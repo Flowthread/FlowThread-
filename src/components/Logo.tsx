@@ -1,12 +1,23 @@
 import React from 'react';
 
-const Logo: React.FC<{ className?: string; showText?: boolean }> = ({ className = "", showText = true }) => {
+export const Logo: React.FC<{ variant?: 'full' | 'icon', className?: string }> = ({ variant = 'full', className = '' }) => {
+  // Use a reliable free image placeholder (FlowThread text as fallback)
+  if (variant === 'full') {
+    return (
+      <div className={`flex flex-col items-center ${className}`}>
+        <img 
+          src="https://placehold.co/400x200/2D7AFF/white?text=FlowThread"
+          alt="FlowThread"
+          className="w-full max-w-[280px] h-auto"
+        />
+      </div>
+    );
+  }
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
-      <img src="/logo.png" alt="FlowThread" className="h-8 w-auto" />
-      {showText && <span className="font-semibold text-lg">FlowThread</span>}
-    </div>
+    <img 
+      src="https://placehold.co/32x32/2D7AFF/white?text=FT"
+      alt="FlowThread"
+      className="h-8 w-auto"
+    />
   );
 };
-
-export default Logo;
