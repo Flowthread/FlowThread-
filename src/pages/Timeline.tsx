@@ -220,7 +220,7 @@ export default function Timeline() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50">
+    <div className="flex flex-col">
       {/* Tabs Header */}
       <div className="sticky top-0 z-50 border-b border-slate-200 bg-white/80 px-4 pt-6 backdrop-blur-md">
         <div className="mb-6 flex items-center justify-between">
@@ -283,13 +283,13 @@ export default function Timeline() {
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 p-4">
+      <div className="flex-1 p-4 sm:p-6 lg:p-8">
         {loading ? (
           <div className="flex h-64 items-center justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
           </div>
         ) : activeTab === "work" ? (
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 pb-24">
             {filteredWorkPosts.length === 0 ? (
               <div className="col-span-full flex flex-col items-center justify-center py-20 text-center">
                 <span className="mb-4 text-5xl">💼</span>
@@ -306,7 +306,7 @@ export default function Timeline() {
                   key={work.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="overflow-hidden rounded-[32px] bg-white p-6 shadow-xl shadow-slate-200/50 ring-1 ring-slate-100"
+                  className="overflow-hidden rounded-[32px] bg-white p-6 shadow-xl shadow-slate-200/50 ring-1 ring-slate-100 transition-all hover:shadow-2xl hover:ring-indigo-100"
                 >
                   <div className="mb-4 flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -373,7 +373,7 @@ export default function Timeline() {
             )}
           </div>
         ) : (
-          <div className="timeline-container no-scrollbar">
+          <div className="timeline-container no-scrollbar mx-auto max-w-2xl">
             {activityItems.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <span className="mb-4 text-5xl">🎬</span>
@@ -441,7 +441,7 @@ export default function Timeline() {
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="w-full max-w-md rounded-[40px] bg-white p-8 shadow-2xl"
+              className="w-full max-w-md rounded-[40px] bg-white p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="mb-8 flex items-center justify-between">
                 <h3 className="text-2xl font-black tracking-tight text-slate-900">Post a Project</h3>

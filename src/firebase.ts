@@ -1,12 +1,22 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, orderBy, onSnapshot, addDoc, updateDoc, Timestamp, getDocFromServer } from "firebase/firestore";
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  FacebookAuthProvider,
+  signInWithPopup, 
+  signOut,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendEmailVerification
+} from "firebase/auth";
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, orderBy, onSnapshot, addDoc, updateDoc, Timestamp, getDocFromServer, deleteDoc, writeBatch } from "firebase/firestore";
 import firebaseConfig from "../firebase-applet-config.json";
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const googleProvider = new GoogleAuthProvider();
+export const facebookProvider = new FacebookAuthProvider();
 
 export const signInWithGoogle = async () => {
   try {
@@ -14,6 +24,16 @@ export const signInWithGoogle = async () => {
     return result.user;
   } catch (error) {
     console.error("Error signing in with Google", error);
+    throw error;
+  }
+};
+
+export const signInWithFacebook = async () => {
+  try {
+    const result = await signInWithPopup(auth, facebookProvider);
+    return result.user;
+  } catch (error) {
+    console.error("Error signing in with Facebook", error);
     throw error;
   }
 };

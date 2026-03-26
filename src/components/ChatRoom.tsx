@@ -13,11 +13,11 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  where,
+  getDocs,
 } from "firebase/firestore";
-import { Message, Task, UserProfile, Notification } from "../types";
-import { Send, Plus, X, Calendar, DollarSign, CheckCircle2, ExternalLink, Loader2, Sparkles, Trash2, FileText, MapPin, Globe, Briefcase, MoreVertical, Edit2, Check, CheckCheck } from "lucide-react";
-import { loadStripe } from "@stripe/stripe-js";
-import { Elements } from "@stripe/react-stripe-js";
+import { Message, Task, UserProfile, Notification, TimelineEvent } from "../types";
+import { Send, Plus, X, Calendar, DollarSign, CheckCircle2, ExternalLink, Loader2, Sparkles, Trash2, FileText, MapPin, Globe, Briefcase, MoreVertical, Edit2, Check, CheckCheck, History, MessageSquare, CreditCard, Star, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { format, addDays, parseISO, isValid } from "date-fns";
 import { clsx } from "clsx";
@@ -36,16 +36,16 @@ export default function ChatRoom() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [thread, setThread] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [payingTaskId, setPayingTaskId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [analyzingMessageId, setAnalyzingMessageId] = useState<string | null>(null);
-  const [taskFilter, setTaskFilter] = useState<"all" | "pending" | "paid" | "delivered" | "completed">("all");
+  const [taskFilter, setTaskFilter] = useState<"all" | "pending" | "waiting_payment_details" | "waiting_client_confirmation" | "waiting_freelancer_confirmation" | "in_progress" | "delivered" | "completed" | "disputed">("all");
   const [showCompleteModal, setShowCompleteModal] = useState<string | null>(null);
   const [showDeleteTaskModal, setShowDeleteTaskModal] = useState<string | null>(null);
   const [showDeleteAllTasksModal, setShowDeleteAllTasksModal] = useState(false);
   const [selectedParticipant, setSelectedParticipant] = useState<UserProfile | null>(null);
   const [showParticipantModal, setShowParticipantModal] = useState(false);
   const [showEditMsgModal, setShowEditMsgModal] = useState(false);
+  const [freelancerPaymentDetails, setFreelancerPaymentDetails] = useState("");
   const prevTasksRef = useRef<Task[]>([]);
   const analyzedMessagesRef = useRef<Set<string>>(new Set());
   const [suggestion, setSuggestion] = useState<{
@@ -57,7 +57,13 @@ export default function ChatRoom() {
   } | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [showRatingModal, setShowRatingModal] = useState<string | null>(null);
+  const [ratingStars, setRatingStars] = useState(0);
+  const [hasRatedTasks, setHasRatedTasks] = useState<Record<string, boolean>>({});
   const [showMsgMenuId, setShowMsgMenuId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"chat" | "timeline">("chat");
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
+  const [updateText, setUpdateText] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [newTask, setNewTask] = useState({
@@ -159,9 +165,23 @@ export default function ChatRoom() {
       }
     );
 
+    const timelineQuery = query(
+      collection(db, "threads", threadId, "timeline"),
+      orderBy("timestamp", "desc")
+    );
+
+    const unsubscribeTimeline = onSnapshot(
+      timelineQuery,
+      (snapshot) => {
+        setTimelineEvents(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as TimelineEvent)));
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, `threads/${threadId}/timeline`)
+    );
+
     return () => {
       unsubscribeMessages();
       unsubscribeTasks();
+      unsubscribeTimeline();
     };
   }, [threadId]);
 
@@ -193,12 +213,67 @@ export default function ChatRoom() {
       tasks.forEach(task => {
         const prevTask = prevTasksRef.current.find(t => t.id === task.id);
         if (prevTask && prevTask.status !== task.status) {
-          toast.success(`Task status updated to ${task.status}`);
+          toast.success(`Task status updated to ${task.status.replace(/_/g, " ")}`);
         }
       });
     }
     prevTasksRef.current = tasks;
   }, [tasks]);
+
+  useEffect(() => {
+    if (!auth.currentUser?.uid || tasks.length === 0) return;
+    
+    const completedTaskIds = tasks.filter(t => t.status === "completed").map(t => t.id);
+    if (completedTaskIds.length === 0) return;
+
+    const q = query(collection(db, "ratings"), where("raterId", "==", auth.currentUser.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const rated: Record<string, boolean> = {};
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        rated[data.taskId] = true;
+      });
+      setHasRatedTasks(rated);
+    }, (error) => {
+      console.error("Error fetching ratings:", error);
+    });
+    return () => unsubscribe();
+  }, [tasks, auth.currentUser?.uid]);
+
+  const addTimelineEvent = async (event: Omit<TimelineEvent, 'id'>) => {
+    if (!threadId) return;
+    try {
+      await addDoc(collection(db, "threads", threadId, "timeline"), {
+        ...event,
+        timestamp: Timestamp.now(),
+        userId: auth.currentUser?.uid,
+      });
+    } catch (err) {
+      console.error("Error adding timeline event", err);
+    }
+  };
+
+  const handlePostUpdate = async () => {
+    if (!updateText.trim() || !threadId) return;
+    
+    setIsSubmitting(true);
+    try {
+      await addTimelineEvent({
+        type: 'freelancer_update',
+        title: 'Freelancer posted an update',
+        description: updateText,
+        metadata: { senderName: auth.currentUser?.displayName },
+        timestamp: Timestamp.now(),
+        userId: auth.currentUser?.uid || ''
+      });
+      setUpdateText("");
+      toast.success("Update posted to timeline");
+    } catch (err) {
+      toast.error("Failed to post update");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const analyzeMessage = async (message: Message, isDirectCommand: boolean = false) => {
     // Skip if there's already a pending task, UNLESS it's a direct command
@@ -386,12 +461,22 @@ Message: "${message.text}"`;
 
     try {
       console.log("[Chat] Sending message:", msg);
-      await addDoc(collection(db, "threads", threadId, "messages"), msg);
+      const msgRef = await addDoc(collection(db, "threads", threadId, "messages"), msg);
       await updateDoc(doc(db, "threads", threadId), {
         lastMessage: inputText,
         updatedAt: Timestamp.now(),
       });
       
+      // Add to timeline
+      await addTimelineEvent({
+        type: 'message',
+        title: `New message from ${auth.currentUser.displayName}`,
+        description: inputText.length > 50 ? inputText.substring(0, 50) + "..." : inputText,
+        metadata: { messageId: msgRef.id, senderId: uid },
+        timestamp: Timestamp.now(),
+        userId: uid
+      });
+
       // Create notification for other participant
       const otherId = thread?.participants?.find((id: string) => id !== uid);
       if (otherId) {
@@ -472,6 +557,16 @@ Message: "${message.text}"`;
       const docRef = await addDoc(collection(db, "threads", threadId, "tasks"), taskData);
       console.log("[handleCreateTask] Task created with ID:", docRef.id);
       
+      // Add to timeline
+      await addTimelineEvent({
+        type: 'task_created',
+        title: `New milestone created: ${newTask.title}`,
+        description: newTask.description,
+        metadata: { taskId: docRef.id, price: newTask.price, deadline: newTask.deadline },
+        timestamp: Timestamp.now(),
+        userId: uid
+      });
+
       // Create notification for other participant
       const otherId = thread?.participants?.find((id: string) => id !== uid);
       if (otherId) {
@@ -519,6 +614,16 @@ Message: "${message.text}"`;
         deliveryFileName: "External Link",
       });
 
+      // Add to timeline
+      await addTimelineEvent({
+        type: 'task_status_changed',
+        title: 'Work delivered',
+        description: 'Freelancer delivered work via URL.',
+        metadata: { taskId: taskId, url: url, status: 'delivered' },
+        timestamp: Timestamp.now(),
+        userId: auth.currentUser?.uid || ''
+      });
+
       // Create notification for other participant
       const otherId = thread?.participants?.find((id: string) => id !== auth.currentUser?.uid);
       if (otherId) {
@@ -544,70 +649,224 @@ Message: "${message.text}"`;
     }
   };
 
-  const handlePay = async (task: Task) => {
-    if (!task.id || !threadId) return;
-    setPayingTaskId(task.id);
+  const handleVotePaymentMethod = async (taskId: string, method: string) => {
+    if (!threadId || !taskId || !userProfile) return;
+    setIsSubmitting(true);
     try {
-      // Check if Demo Mode is enabled
-      if (userProfile?.demoMode) {
-        alert("Payment simulated (Stripe integration pending)");
-        await updateDoc(doc(db, "threads", threadId, "tasks", task.id), {
-          status: "paid",
-          paidAt: Timestamp.now(),
-        });
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return;
 
-        // Create notification for other participant
-        const otherId = thread?.participants?.find((id: string) => id !== auth.currentUser?.uid);
-        if (otherId) {
-          await addDoc(collection(db, "users", otherId, "notifications"), {
-            userId: otherId,
-            title: "Milestone Paid",
-            message: `The client has paid for "${task.title}".`,
-            type: "payment",
-            link: `/threads/${threadId}`,
-            read: false,
-            createdAt: Timestamp.now()
+      const isClient = userProfile.role === "client";
+      const updateData: any = {};
+      
+      if (isClient) {
+        updateData.clientVote = method;
+      } else {
+        updateData.freelancerVote = method;
+      }
+
+      // Check if both have voted and they match
+      const otherVote = isClient ? task.freelancerVote : task.clientVote;
+      
+      if (otherVote === method) {
+        updateData.paymentMethod = method;
+        updateData.status = "waiting_payment_details";
+      }
+
+      await updateDoc(doc(db, "threads", threadId, "tasks", taskId), updateData);
+
+      if (otherVote === method) {
+        await addTimelineEvent({
+          type: 'task_status_changed',
+          title: 'Payment method agreed',
+          description: `Both parties agreed on ${method} as payment method.`,
+          metadata: { taskId, paymentMethod: method, status: 'waiting_payment_details' },
+          timestamp: Timestamp.now(),
+          userId: auth.currentUser?.uid || ''
+        });
+        toast.success(`Payment method ${method} agreed upon.`);
+      } else {
+        toast.success(`Voted for ${method}. Waiting for other party.`);
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `threads/${threadId}/tasks/${taskId}`);
+      toast.error("Failed to vote for payment method.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSubmitPaymentDetails = async (taskId: string) => {
+    if (!threadId || !taskId || !freelancerPaymentDetails.trim()) return;
+    setIsSubmitting(true);
+    try {
+      await updateDoc(doc(db, "threads", threadId, "tasks", taskId), {
+        freelancerPaymentDetails: freelancerPaymentDetails.trim(),
+        status: "waiting_client_confirmation",
+      });
+
+      await addTimelineEvent({
+        type: 'task_status_changed',
+        title: 'Payment details submitted',
+        description: 'Freelancer submitted payment account details.',
+        metadata: { taskId, status: 'waiting_client_confirmation' },
+        timestamp: Timestamp.now(),
+        userId: auth.currentUser?.uid || ''
+      });
+
+      toast.success("Payment details submitted.");
+      setFreelancerPaymentDetails("");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `threads/${threadId}/tasks/${taskId}`);
+      toast.error("Failed to submit payment details.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleClientConfirmPayment = async (taskId: string) => {
+    if (!threadId || !taskId) return;
+    setIsSubmitting(true);
+    try {
+      await updateDoc(doc(db, "threads", threadId, "tasks", taskId), {
+        status: "waiting_freelancer_confirmation",
+      });
+
+      await addTimelineEvent({
+        type: 'payment',
+        title: 'Payment sent',
+        description: 'Client confirmed they have sent the payment.',
+        metadata: { taskId, status: 'waiting_freelancer_confirmation' },
+        timestamp: Timestamp.now(),
+        userId: auth.currentUser?.uid || ''
+      });
+
+      toast.success("Payment confirmed. Waiting for freelancer to verify.");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `threads/${threadId}/tasks/${taskId}`);
+      toast.error("Failed to confirm payment.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleFreelancerConfirmPayment = async (taskId: string) => {
+    if (!threadId || !taskId || !thread) return;
+    setIsSubmitting(true);
+    try {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return;
+
+      await updateDoc(doc(db, "threads", threadId, "tasks", taskId), {
+        status: "in_progress",
+        paidAt: Timestamp.now(),
+      });
+
+      // Create transaction record
+      await addDoc(collection(db, "transactions"), {
+        taskId,
+        amount: task.price,
+        fee: 0, // Manual payment, no platform fee for now
+        status: "completed",
+        fromId: task.clientId,
+        toId: task.freelancerId,
+        createdAt: Timestamp.now(),
+      });
+
+      await addTimelineEvent({
+        type: 'payment',
+        title: 'Payment received',
+        description: 'Freelancer confirmed receipt of payment.',
+        metadata: { taskId, status: 'in_progress' },
+        timestamp: Timestamp.now(),
+        userId: auth.currentUser?.uid || ''
+      });
+
+      toast.success("Payment received. Milestone is now in progress.");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `threads/${threadId}/tasks/${taskId}`);
+      toast.error("Failed to confirm payment receipt.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleFreelancerDisputePayment = async (taskId: string) => {
+    if (!threadId || !taskId || !thread) return;
+    setIsSubmitting(true);
+    try {
+      await updateDoc(doc(db, "threads", threadId, "tasks", taskId), {
+        status: "disputed",
+      });
+
+      await addTimelineEvent({
+        type: 'task_status_changed',
+        title: 'Payment disputed',
+        description: 'Freelancer reported they did not receive the payment.',
+        metadata: { taskId, status: 'disputed' },
+        timestamp: Timestamp.now(),
+        userId: auth.currentUser?.uid || ''
+      });
+
+      if (thread.clientId) {
+        const clientDocRef = doc(db, "users", thread.clientId);
+        const clientDoc = await getDoc(clientDocRef);
+        if (clientDoc.exists()) {
+          const currentCount = clientDoc.data().disputeCount || 0;
+          const newCount = currentCount + 1;
+          await updateDoc(clientDocRef, {
+            disputeCount: newCount,
+            banned: newCount >= 3 ? true : clientDoc.data().banned || false
           });
         }
-
-        setPayingTaskId(null);
-        return;
       }
 
-      // Fetch the freelancer's stripeAccountId
-      if (!task.freelancerId) {
-        throw new Error("Freelancer not assigned to this task");
-      }
-      
-      const freelancerDoc = await getDoc(doc(db, "users", task.freelancerId));
-      const freelancerData = freelancerDoc.data() as UserProfile;
-      
-      const response = await fetch("/api/create-checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskId: task.id,
-          threadId: threadId,
-          title: task.title,
-          price: task.price,
-          freelancerStripeAccountId: freelancerData?.stripeAccountId || null,
-        }),
+      toast.error("Payment disputed. Admin will review the case.");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `threads/${threadId}/tasks/${taskId}`);
+      toast.error("Failed to dispute payment.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleReportIssue = async (taskId: string) => {
+    if (!threadId || !taskId || !thread || !userProfile) return;
+    setIsSubmitting(true);
+    try {
+      await updateDoc(doc(db, "threads", threadId, "tasks", taskId), {
+        status: "disputed",
       });
-      
-      if (!response.ok) {
-        throw new Error("Failed to create checkout session.");
+
+      await addTimelineEvent({
+        type: 'task_status_changed',
+        title: 'Task disputed',
+        description: `${userProfile.role === 'client' ? 'Client' : 'Freelancer'} reported an issue.`,
+        metadata: { taskId, status: 'disputed' },
+        timestamp: Timestamp.now(),
+        userId: auth.currentUser?.uid || ''
+      });
+
+      const otherUserId = userProfile.role === "client" ? thread.freelancerId : thread.clientId;
+      if (otherUserId) {
+        const otherDocRef = doc(db, "users", otherUserId);
+        const otherDoc = await getDoc(otherDocRef);
+        if (otherDoc.exists()) {
+          const currentCount = otherDoc.data().disputeCount || 0;
+          const newCount = currentCount + 1;
+          await updateDoc(otherDocRef, {
+            disputeCount: newCount,
+            banned: newCount >= 3 ? true : otherDoc.data().banned || false
+          });
+        }
       }
 
-      const session = await response.json();
-      if (session.url) {
-        window.location.href = session.url;
-      } else {
-        throw new Error("No checkout URL returned from Stripe");
-      }
-    } catch (err: any) {
-      console.error("Payment error", err);
-      setError(err.message || "Payment failed to initialize.");
-      setPayingTaskId(null);
+      toast.error("Issue reported. Admin will review the case.");
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `threads/${threadId}/tasks/${taskId}`);
+      toast.error("Failed to report issue.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -617,8 +876,19 @@ Message: "${message.text}"`;
     try {
       await updateDoc(doc(db, "threads", threadId, "tasks", taskId), {
         status: "completed",
+        completedAt: Timestamp.now(),
       });
       
+      // Add to timeline
+      await addTimelineEvent({
+        type: 'milestone_achieved',
+        title: 'Milestone completed',
+        description: 'Client approved and completed the milestone.',
+        metadata: { taskId: taskId, status: 'completed' },
+        timestamp: Timestamp.now(),
+        userId: auth.currentUser?.uid || ''
+      });
+
       const otherId = thread?.participants?.find((id: string) => id !== auth.currentUser?.uid);
       if (otherId) {
         await addDoc(collection(db, "users", otherId, "notifications"), {
@@ -635,6 +905,53 @@ Message: "${message.text}"`;
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `threads/${threadId}/tasks/${taskId}`);
       setError("Failed to complete task.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSubmitRating = async () => {
+    if (!showRatingModal || ratingStars === 0 || !userProfile || !thread) return;
+    setIsSubmitting(true);
+    try {
+      const task = tasks.find(t => t.id === showRatingModal);
+      if (!task) return;
+
+      const ratedUserId = userProfile.role === "client" ? task.freelancerId : task.clientId;
+
+      // Add rating document
+      await addDoc(collection(db, "ratings"), {
+        raterId: auth.currentUser?.uid,
+        ratedUserId,
+        taskId: task.id,
+        stars: ratingStars,
+        createdAt: Timestamp.now(),
+      });
+
+      // Recalculate average rating
+      const ratingsQuery = query(collection(db, "ratings"), where("ratedUserId", "==", ratedUserId));
+      const ratingsSnapshot = await getDocs(ratingsQuery);
+      let totalStars = 0;
+      let count = 0;
+      ratingsSnapshot.forEach(doc => {
+        totalStars += doc.data().stars;
+        count++;
+      });
+      
+      const newAverage = count > 0 ? totalStars / count : 0;
+
+      // Update user document
+      await updateDoc(doc(db, "users", ratedUserId), {
+        rating: newAverage,
+        ratingCount: count,
+      });
+
+      toast.success("Rating submitted successfully!");
+      setShowRatingModal(null);
+      setRatingStars(0);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `ratings`);
+      toast.error("Failed to submit rating.");
     } finally {
       setIsSubmitting(false);
     }
@@ -737,7 +1054,7 @@ Message: "${message.text}"`;
   return (
     <div className="flex h-screen flex-col bg-white">
       {/* Header */}
-      <header className="flex h-16 items-center border-b border-gray-100 bg-white/80 px-4 backdrop-blur-md">
+      <header className="flex h-16 items-center border-b border-gray-100 bg-white/80 px-4 sm:px-6 backdrop-blur-md">
         <button onClick={() => navigate("/threads")} className="mr-4 text-gray-400 hover:text-gray-600 transition-colors">
           <X size={24} />
         </button>
@@ -753,9 +1070,61 @@ Message: "${message.text}"`;
         </div>
       </header>
 
+      {/* Tab Switcher */}
+      <div className="flex border-b border-gray-100 bg-white">
+        <button
+          onClick={() => setActiveTab("chat")}
+          className={clsx(
+            "flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2",
+            activeTab === "chat" ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-400"
+          )}
+        >
+          <div className="flex items-center justify-center gap-2">
+            <MessageSquare size={14} />
+            Chat
+          </div>
+        </button>
+        <button
+          onClick={() => setActiveTab("timeline")}
+          className={clsx(
+            "flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-all border-b-2",
+            activeTab === "timeline" ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-400"
+          )}
+        >
+          <div className="flex items-center justify-center gap-2">
+            <History size={14} />
+            Timeline
+          </div>
+        </button>
+      </div>
+
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
-        {combinedItems.map((item) => {
+      {activeTab === "chat" && (
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="px-4 py-2 border-b border-gray-50 bg-white flex gap-2 overflow-x-auto no-scrollbar">
+            {(["all", "pending", "waiting_payment_details", "waiting_client_confirmation", "waiting_freelancer_confirmation", "in_progress", "delivered", "completed", "disputed"] as const).map((filter) => (
+              <button
+                key={filter}
+                onClick={() => setTaskFilter(filter)}
+                className={clsx(
+                  "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-all",
+                  taskFilter === filter
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-100"
+                    : "bg-gray-100 text-gray-400 hover:bg-gray-200"
+                )}
+              >
+                {filter.replace(/_/g, " ")}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 no-scrollbar">
+          {combinedItems
+            .filter(item => {
+              if (item.itemType === 'message') return true;
+              if (taskFilter === 'all') return true;
+              return item.status === taskFilter;
+            })
+            .map((item) => {
           if (item.itemType === "message") {
             const isMe = item.senderId === auth.currentUser?.uid;
             const otherParticipantId = thread?.participants?.find((id: string) => id !== auth.currentUser?.uid);
@@ -813,7 +1182,7 @@ Message: "${message.text}"`;
 
                   <div
                     className={clsx(
-                      "relative max-w-[80%] rounded-2xl px-4 py-2 text-sm shadow-sm",
+                      "relative max-w-[85%] sm:max-w-[80%] rounded-2xl px-4 py-2 text-sm shadow-sm break-words",
                       isMe
                         ? "chat-bubble-right bg-indigo-600 text-white"
                         : "chat-bubble-left bg-gray-100 text-gray-900"
@@ -905,17 +1274,30 @@ Message: "${message.text}"`;
                     <Trash2 size={16} />
                   </button>
                 )}
+                {item.status !== "completed" && item.status !== "disputed" && item.status !== "pending" && (
+                  <button
+                    onClick={() => handleReportIssue(item.id)}
+                    className="absolute top-4 right-10 text-gray-300 hover:text-red-500 transition-colors"
+                    title="Report Issue"
+                  >
+                    <AlertTriangle size={16} />
+                  </button>
+                )}
                 <div className="mb-3 flex items-center gap-2">
                   <span className="rounded-full bg-indigo-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-indigo-600">
                     Task
                   </span>
                   <span className={clsx(
                     "text-[10px] font-bold uppercase",
-                    item.status === "paid" ? "text-emerald-500" : 
+                    item.status === "in_progress" ? "text-emerald-500" : 
                     item.status === "delivered" ? "text-blue-500" :
-                    item.status === "completed" ? "text-purple-500" : "text-amber-500"
+                    item.status === "completed" ? "text-purple-500" : 
+                    item.status === "waiting_freelancer_confirmation" ? "text-green-500" :
+                    item.status === "waiting_client_confirmation" ? "text-indigo-500" :
+                    item.status === "disputed" ? "text-red-500" :
+                    item.status === "waiting_payment_details" ? "text-orange-500" : "text-amber-500"
                   )}>
-                    {item.status}
+                    {item.status.replace(/_/g, " ")}
                   </span>
                 </div>
                 <h3 className="mb-1 font-bold text-gray-900">{item.title}</h3>
@@ -933,36 +1315,152 @@ Message: "${message.text}"`;
                   </div>
                 </div>
 
-                {userProfile?.role === "client" && item.status === "pending" && (
-                  <button
-                    onClick={() => handlePay(item as Task)}
-                    disabled={payingTaskId === item.id}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2 text-sm font-bold text-white transition-all active:scale-95 disabled:opacity-50"
-                  >
-                    {payingTaskId === item.id ? (
-                      <Loader2 size={18} className="animate-spin" />
-                    ) : (
-                      "Pay"
-                    )}
-                  </button>
+                {item.status === "pending" && thread?.clientId && thread?.freelancerId && (
+                  <div className="mt-4 space-y-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Vote for Payment Method</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {["JazzCash", "Easypaisa", "SadaPay", "Bank Transfer", "Other"].map((method) => {
+                        const myVote = userProfile?.role === "client" ? item.clientVote : item.freelancerVote;
+                        const isSelected = myVote === method;
+                        return (
+                          <button
+                            key={method}
+                            onClick={() => handleVotePaymentMethod(item.id, method)}
+                            disabled={isSubmitting}
+                            className={clsx(
+                              "rounded-xl border px-2 py-2 text-[10px] font-bold transition-all",
+                              isSelected 
+                                ? "border-indigo-600 bg-indigo-50 text-indigo-700" 
+                                : "border-gray-100 bg-gray-50 text-gray-700 hover:border-indigo-600 hover:text-indigo-600"
+                            )}
+                          >
+                            {method}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex justify-between text-[10px] text-gray-500 mt-2">
+                      <span>Client Vote: <strong className="text-gray-900">{item.clientVote || "Waiting..."}</strong></span>
+                      <span>Freelancer Vote: <strong className="text-gray-900">{item.freelancerVote || "Waiting..."}</strong></span>
+                    </div>
+                  </div>
                 )}
 
-                {userProfile?.role === "freelancer" && item.status === "paid" && (
+                {item.status === "waiting_payment_details" && (
+                  <div className="mt-4 rounded-xl bg-indigo-50 p-3 border border-indigo-100">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CreditCard className="w-4 h-4 text-indigo-600" />
+                      <span className="text-[10px] font-bold text-indigo-900">Method: {item.paymentMethod}</span>
+                    </div>
+                    {userProfile?.role === "freelancer" ? (
+                      <div className="space-y-2">
+                        <p className="text-[10px] text-indigo-700">Enter your {item.paymentMethod} details:</p>
+                        <textarea
+                          value={freelancerPaymentDetails}
+                          onChange={(e) => setFreelancerPaymentDetails(e.target.value)}
+                          placeholder="Account #, Name, etc."
+                          className="w-full rounded-lg border-none bg-white p-2 text-[10px] outline-none ring-1 ring-indigo-200 focus:ring-2 focus:ring-indigo-500"
+                          rows={2}
+                        />
+                        <button
+                          onClick={() => handleSubmitPaymentDetails(item.id)}
+                          disabled={isSubmitting || !freelancerPaymentDetails.trim()}
+                          className="w-full rounded-lg bg-indigo-600 py-2 text-[10px] font-bold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          Submit Details
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-indigo-600 italic">Waiting for freelancer details...</p>
+                    )}
+                  </div>
+                )}
+
+                {item.status === "waiting_client_confirmation" && (
+                  <div className="mt-4 rounded-xl bg-indigo-50 p-3 border border-indigo-100">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <CreditCard className="w-4 h-4 text-indigo-600" />
+                        <span className="text-[10px] font-bold text-indigo-900">Method: {item.paymentMethod}</span>
+                      </div>
+                      <div className="rounded-lg bg-white p-2 border border-indigo-100">
+                        <p className="text-[9px] font-bold text-gray-400 uppercase mb-1">Freelancer Details:</p>
+                        <p className="text-[10px] text-gray-900 whitespace-pre-wrap">{item.freelancerPaymentDetails}</p>
+                      </div>
+                      {userProfile?.role === "client" ? (
+                        <button
+                          onClick={() => handleClientConfirmPayment(item.id)}
+                          disabled={isSubmitting}
+                          className="w-full rounded-lg bg-indigo-600 py-2 text-[10px] font-bold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          I have paid (confirm payment)
+                        </button>
+                      ) : (
+                        <p className="text-[10px] text-indigo-600 italic">Waiting for client to confirm payment...</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {item.status === "waiting_freelancer_confirmation" && (
+                  <div className="mt-4 rounded-xl bg-green-50 p-3 border border-green-100">
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-green-600" />
+                        <span className="text-[10px] font-bold text-green-900">Payment Sent</span>
+                      </div>
+                      {userProfile?.role === "freelancer" ? (
+                        <div className="space-y-2">
+                          <p className="text-[10px] text-green-700">Verify payment and confirm:</p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleFreelancerConfirmPayment(item.id)}
+                              disabled={isSubmitting}
+                              className="flex-1 rounded-lg bg-green-600 py-2 text-[10px] font-bold text-white shadow-sm hover:bg-green-700 transition-all"
+                            >
+                              ✅ I received payment
+                            </button>
+                            <button
+                              onClick={() => handleFreelancerDisputePayment(item.id)}
+                              disabled={isSubmitting}
+                              className="flex-1 rounded-lg bg-red-600 py-2 text-[10px] font-bold text-white shadow-sm hover:bg-red-700 transition-all"
+                            >
+                              ❌ I did not receive payment
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-green-600 italic">Waiting for freelancer confirmation...</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {userProfile?.role === "freelancer" && item.status === "in_progress" && (
                   <button
                     onClick={() => setShowDeliverModal(item.id)}
-                    className="w-full rounded-xl bg-emerald-600 py-2 text-sm font-bold text-white transition-all active:scale-95"
+                    className="mt-4 w-full rounded-xl bg-indigo-600 py-2 text-sm font-bold text-white transition-all active:scale-95"
                   >
-                    Send
+                    Deliver Work
                   </button>
                 )}
 
                 {userProfile?.role === "client" && item.status === "delivered" && (
-                  <button
-                    onClick={() => setShowCompleteModal(item.id)}
-                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2 text-sm font-bold text-white transition-all active:scale-95"
-                  >
-                    Approve Completion
-                  </button>
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      onClick={() => setShowCompleteModal(item.id)}
+                      className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-indigo-600 py-2 text-sm font-bold text-white transition-all active:scale-95"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => handleReportIssue(item.id)}
+                      className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-red-50 py-2 text-sm font-bold text-red-600 hover:bg-red-100 transition-all active:scale-95"
+                    >
+                      <AlertTriangle size={16} />
+                      Report Issue
+                    </button>
+                  </div>
                 )}
 
                 {item.status === "delivered" && userProfile?.role === "freelancer" && (
@@ -985,20 +1483,31 @@ Message: "${message.text}"`;
                 )}
                 
                 {item.status === "completed" && (
-                  <div className="mt-4 flex flex-col items-center justify-center gap-1 rounded-xl bg-purple-50 py-2 px-4 text-sm font-bold text-purple-700">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 size={16} className="text-purple-500" />
-                      Completed
-                      {item.deliveryUrl && (
-                        <a href={item.deliveryUrl} target="_blank" rel="noreferrer" className="text-indigo-600">
-                          <ExternalLink size={14} />
-                        </a>
+                  <div className="mt-4 flex flex-col gap-2">
+                    <div className="flex flex-col items-center justify-center gap-1 rounded-xl bg-purple-50 py-2 px-4 text-sm font-bold text-purple-700">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 size={16} className="text-purple-500" />
+                        Completed
+                        {item.deliveryUrl && (
+                          <a href={item.deliveryUrl} target="_blank" rel="noreferrer" className="text-indigo-600">
+                            <ExternalLink size={14} />
+                          </a>
+                        )}
+                      </div>
+                      {item.deliveryFileName && (
+                        <span className="text-[10px] text-purple-400 font-normal truncate max-w-full">
+                          {item.deliveryFileName}
+                        </span>
                       )}
                     </div>
-                    {item.deliveryFileName && (
-                      <span className="text-[10px] text-purple-400 font-normal truncate max-w-full">
-                        {item.deliveryFileName}
-                      </span>
+                    {!hasRatedTasks[item.id] && (
+                      <button
+                        onClick={() => setShowRatingModal(item.id)}
+                        className="w-full rounded-lg bg-yellow-500 py-2 text-[10px] font-bold text-white shadow-sm hover:bg-yellow-600 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Star className="w-4 h-4" />
+                        Rate {userProfile?.role === "client" ? "Freelancer" : "Client"}
+                      </button>
                     )}
                   </div>
                 )}
@@ -1006,11 +1515,93 @@ Message: "${message.text}"`;
             );
           }
         })}
-        <div ref={scrollRef} />
+          <div ref={scrollRef} />
+        </div>
       </div>
+      )}
+
+      {/* Timeline Area */}
+      {activeTab === "timeline" && (
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 no-scrollbar bg-gray-50/30">
+          {userProfile?.role === "freelancer" && (
+            <div className="mb-6 rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm">
+              <h4 className="mb-2 text-[10px] font-bold uppercase tracking-wider text-indigo-600">Post Update</h4>
+              <textarea
+                value={updateText}
+                onChange={(e) => setUpdateText(e.target.value)}
+                placeholder="What's the latest update on the project?"
+                className="w-full resize-none rounded-xl border-none bg-gray-50 p-3 text-sm focus:ring-2 focus:ring-indigo-500"
+                rows={3}
+              />
+              <div className="mt-2 flex justify-end">
+                <button
+                  onClick={handlePostUpdate}
+                  disabled={isSubmitting || !updateText.trim()}
+                  className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : "Post Update"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="relative space-y-8 before:absolute before:left-4 before:top-2 before:h-[calc(100%-16px)] before:w-0.5 before:bg-gray-200">
+            {timelineEvents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="mb-4 rounded-full bg-gray-100 p-4 text-gray-400">
+                  <History size={32} />
+                </div>
+                <h3 className="text-sm font-bold text-gray-900">No events yet</h3>
+                <p className="text-xs text-gray-500">Project milestones and updates will appear here.</p>
+              </div>
+            ) : (
+              timelineEvents.map((event) => (
+                <div key={event.id} className="relative pl-10">
+                  <div className="absolute left-0 top-0 flex h-8 w-8 items-center justify-center rounded-full border-4 border-white bg-indigo-600 text-white shadow-sm">
+                    {event.type === 'message' && <MessageSquare size={14} />}
+                    {event.type === 'task_created' && <Plus size={14} />}
+                    {event.type === 'task_status_changed' && <Check size={14} />}
+                    {event.type === 'payment' && <DollarSign size={14} />}
+                    {event.type === 'freelancer_update' && <Edit2 size={14} />}
+                    {event.type === 'milestone_achieved' && <CheckCircle2 size={14} />}
+                  </div>
+                  <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+                    <div className="mb-1 flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-gray-900">{event.title}</h4>
+                      <span className="text-[10px] text-gray-400">
+                        {event.timestamp instanceof Timestamp 
+                          ? format(event.timestamp.toDate(), "MMM d, HH:mm")
+                          : "Just now"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 leading-relaxed">{event.description}</p>
+                    {event.metadata?.price && (
+                      <div className="mt-2 text-[10px] font-bold text-indigo-600">
+                        Budget: ${event.metadata.price}
+                      </div>
+                    )}
+                    {event.metadata?.url && (
+                      <a 
+                        href={event.metadata.url} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 hover:underline"
+                      >
+                        <ExternalLink size={10} />
+                        View Delivery
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Input Area */}
-      <div className="border-t border-gray-100 p-4 bg-white">
+      {activeTab === "chat" && (
+      <div className="border-t border-gray-100 p-4 sm:p-6 bg-white">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowTaskModal(true)}
@@ -1037,16 +1628,17 @@ Message: "${message.text}"`;
           </form>
         </div>
       </div>
+      )}
 
       {/* Participant Profile Modal */}
       <AnimatePresence>
         {showParticipantModal && selectedParticipant && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4 sm:p-6 backdrop-blur-sm">
             <motion.div 
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="w-full max-w-sm overflow-hidden rounded-[32px] bg-white shadow-2xl"
+              className="w-full max-w-sm overflow-hidden rounded-[32px] bg-white shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="relative h-24 bg-indigo-600">
                 <button 
@@ -1062,7 +1654,15 @@ Message: "${message.text}"`;
                   alt={selectedParticipant.displayName}
                   className="mb-4 h-24 w-24 rounded-[32px] border-4 border-white object-cover shadow-xl"
                 />
-                <h3 className="text-xl font-bold text-gray-900">{selectedParticipant.displayName}</h3>
+                <h3 className="text-xl font-bold text-gray-900 flex items-center justify-center gap-2">
+                  {selectedParticipant.displayName}
+                  {selectedParticipant.rating !== undefined && (
+                    <span className="flex items-center text-sm font-bold text-yellow-500 bg-yellow-50 px-2 py-0.5 rounded-full">
+                      ★ {selectedParticipant.rating.toFixed(1)} <span className="text-yellow-600/60 ml-1 text-xs">({selectedParticipant.ratingCount || 0})</span>
+                    </span>
+                  )}
+                </h3>
+                <p className="mb-1 text-sm text-gray-500">{selectedParticipant.email}</p>
                 <span className="mb-4 rounded-full bg-indigo-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-indigo-600">
                   {selectedParticipant.role}
                 </span>
@@ -1127,7 +1727,7 @@ Message: "${message.text}"`;
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"
+              className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="mb-6 flex items-center justify-between">
                 <h3 className="text-xl font-bold text-gray-900">Add Milestone</h3>
@@ -1197,7 +1797,7 @@ Message: "${message.text}"`;
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"
+              className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="mb-6 flex items-center justify-between">
                 <h3 className="text-xl font-bold text-gray-900">Deliver Work</h3>
@@ -1240,7 +1840,7 @@ Message: "${message.text}"`;
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center"
+              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
                 <CheckCircle2 size={24} />
@@ -1269,6 +1869,65 @@ Message: "${message.text}"`;
         )}
       </AnimatePresence>
 
+      {/* Rating Modal */}
+      <AnimatePresence>
+        {showRatingModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center max-h-[90vh] overflow-y-auto no-scrollbar"
+            >
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-yellow-100 text-yellow-600">
+                <Star size={24} className="fill-yellow-500" />
+              </div>
+              <h3 className="mb-2 text-xl font-bold text-gray-900">Rate {userProfile?.role === "client" ? "Freelancer" : "Client"}</h3>
+              <p className="mb-6 text-sm text-gray-500">
+                How was your experience working with them?
+              </p>
+              
+              <div className="flex justify-center gap-2 mb-6">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    onClick={() => setRatingStars(star)}
+                    className="focus:outline-none transition-transform hover:scale-110"
+                  >
+                    <Star
+                      size={32}
+                      className={clsx(
+                        "transition-colors",
+                        star <= ratingStars ? "fill-yellow-400 text-yellow-400" : "text-gray-300"
+                      )}
+                    />
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowRatingModal(null);
+                    setRatingStars(0);
+                  }}
+                  className="flex-1 rounded-xl bg-gray-100 py-3 font-bold text-gray-600 transition-all active:scale-95"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSubmitRating}
+                  disabled={isSubmitting || ratingStars === 0}
+                  className="flex-1 flex items-center justify-center rounded-xl bg-indigo-600 py-3 font-bold text-white transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : "Submit"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Delete Task Modal */}
       <AnimatePresence>
         {showDeleteTaskModal && (
@@ -1277,7 +1936,7 @@ Message: "${message.text}"`;
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center"
+              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600">
                 <Trash2 size={24} />
@@ -1314,7 +1973,7 @@ Message: "${message.text}"`;
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"
+              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <h3 className="mb-4 text-lg font-bold text-gray-900">Edit Message</h3>
               <textarea
@@ -1357,7 +2016,7 @@ Message: "${message.text}"`;
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center"
+              className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600">
                 <Trash2 size={24} />

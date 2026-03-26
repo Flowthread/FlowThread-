@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { auth, db, logout } from "../firebase";
-import { doc, getDoc, addDoc, collection, Timestamp, updateDoc, deleteDoc } from "firebase/firestore";
+import { doc, getDoc, addDoc, collection, Timestamp, updateDoc, deleteDoc, writeBatch, query, where, getDocs } from "firebase/firestore";
 import { UserProfile } from "../types";
 import { 
   LogOut, Bell, Shield, HelpCircle, ChevronRight, Camera, 
   UserPlus, Copy, Check, Moon, Sun, Mail, Smartphone, 
   ExternalLink, Trash2, AlertTriangle, MessageSquare,
-  MapPin, Globe, FileText, Briefcase, Plus, X, Search
+  MapPin, Globe, FileText, Briefcase, Plus, X, Search,
+  Activity
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -132,6 +133,46 @@ export default function Profile() {
     }
   };
 
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  const handleClearActivity = async () => {
+    if (!auth.currentUser) return;
+    setClearing(true);
+    try {
+      const batch = writeBatch(db);
+      
+      // 1. Delete workPosts
+      const workPostsQuery = query(collection(db, "workPosts"), where("clientId", "==", auth.currentUser.uid));
+      const workPostsSnap = await getDocs(workPostsQuery);
+      workPostsSnap.forEach(d => batch.delete(d.ref));
+
+      // 2. Delete notifications
+      const notifsQuery = query(collection(db, "users", auth.currentUser.uid, "notifications"));
+      const notifsSnap = await getDocs(notifsQuery);
+      notifsSnap.forEach(d => batch.delete(d.ref));
+
+      // 3. Delete timeline events (from threads)
+      const threadsQuery = query(collection(db, "threads"), where("participants", "array-contains", auth.currentUser.uid));
+      const threadsSnap = await getDocs(threadsQuery);
+      
+      for (const threadDoc of threadsSnap.docs) {
+        const timelineQuery = query(collection(db, "threads", threadDoc.id, "timeline"), where("userId", "==", auth.currentUser.uid));
+        const timelineSnap = await getDocs(timelineQuery);
+        timelineSnap.forEach(d => batch.delete(d.ref));
+      }
+
+      await batch.commit();
+      toast.success("Activity cleared successfully!");
+    } catch (err) {
+      console.error("Error clearing activity", err);
+      toast.error("Failed to clear activity.");
+    } finally {
+      setClearing(false);
+      setShowClearModal(false);
+    }
+  };
+
   const handleDeleteAccount = async () => {
     if (!auth.currentUser) return;
     setDeleting(true);
@@ -181,7 +222,7 @@ export default function Profile() {
   );
 
   return (
-    <div className="px-4 py-8 pb-24">
+    <div className="px-4 py-8 pb-24 sm:px-6 lg:px-8">
       <header className="mb-8 flex flex-col items-center text-center">
         <div className="relative mb-4">
           <img
@@ -316,7 +357,14 @@ export default function Profile() {
           </div>
         ) : (
           <>
-            <h2 className="text-xl font-bold text-slate-900">{profile?.displayName}</h2>
+            <h2 className="text-xl font-bold text-slate-900 flex items-center justify-center gap-2">
+              {profile?.displayName}
+              {profile?.rating !== undefined && (
+                <span className="flex items-center text-sm font-bold text-yellow-500 bg-yellow-50 px-2 py-0.5 rounded-full">
+                  ★ {profile.rating.toFixed(1)} <span className="text-yellow-600/60 ml-1 text-xs">({profile.ratingCount || 0})</span>
+                </span>
+              )}
+            </h2>
             <p className="mb-1 text-sm text-slate-500">{profile?.email}</p>
             {profile?.location && (
               <div className="mb-3 flex items-center justify-center gap-1 text-xs text-slate-400">
@@ -492,6 +540,16 @@ export default function Profile() {
           <h3 className="mb-3 px-4 text-[10px] font-bold uppercase tracking-[0.2em] text-rose-400">Danger Zone</h3>
           <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-rose-100">
             <button 
+              onClick={() => setShowClearModal(true)}
+              className="flex w-full items-center gap-3 p-4 transition-colors hover:bg-rose-50"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
+                <Activity size={20} />
+              </div>
+              <span className="font-bold text-rose-600">Clear All Activity</span>
+            </button>
+            <div className="h-px bg-rose-50 mx-4"></div>
+            <button 
               onClick={() => setShowDeleteModal(true)}
               className="flex w-full items-center gap-3 p-4 transition-colors hover:bg-rose-50"
             >
@@ -516,10 +574,41 @@ export default function Profile() {
         <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300">FlowThread v1.1.0</p>
       </footer>
 
+      {/* Clear Activity Modal */}
+      {showClearModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 sm:p-6 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-[32px] bg-white p-8 shadow-2xl">
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 mx-auto">
+              <Activity size={32} />
+            </div>
+            <h3 className="mb-2 text-center text-xl font-bold text-slate-900">Clear All Activity?</h3>
+            <p className="mb-8 text-center text-sm text-slate-500">
+              This will permanently delete all your work posts, timeline events, and notifications. This action cannot be undone.
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={handleClearActivity}
+                disabled={clearing}
+                className="w-full rounded-2xl bg-rose-600 py-4 font-bold text-white shadow-lg shadow-rose-200 transition-all active:scale-95 disabled:opacity-50"
+              >
+                {clearing ? "Clearing..." : "Yes, Clear Activity"}
+              </button>
+              <button
+                onClick={() => setShowClearModal(false)}
+                disabled={clearing}
+                className="w-full rounded-2xl bg-slate-100 py-4 font-bold text-slate-600 transition-all active:scale-95"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-[32px] bg-white p-8 shadow-2xl">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 sm:p-6 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-[32px] bg-white p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar">
             <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 mx-auto">
               <AlertTriangle size={32} />
             </div>

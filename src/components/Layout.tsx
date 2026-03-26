@@ -144,59 +144,59 @@ export default function Layout() {
       </header>
 
       <main className="flex-1 overflow-y-auto no-scrollbar">
-        <div className="mx-auto w-full max-w-7xl">
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
           <Outlet />
         </div>
       </main>
 
-      <nav className="bottom-nav fixed bottom-0 left-0 right-0 z-50 flex h-16 items-center justify-around border-t border-gray-100 bg-white px-4">
+      <nav className="bottom-nav fixed bottom-0 left-0 right-0 z-50 flex h-16 items-center justify-around border-t border-gray-100 bg-white px-4 sm:mx-auto sm:max-w-md sm:rounded-t-[32px] sm:shadow-2xl sm:ring-1 sm:ring-gray-100 lg:max-w-lg">
         <NavLink
           to="/threads"
           className={({ isActive }) =>
             clsx(
-              "flex flex-col items-center gap-1 transition-colors",
+              "flex flex-col items-center gap-1 transition-all hover:scale-110",
               isActive ? "text-indigo-600" : "text-gray-400"
             )
           }
         >
           <MessageSquare size={24} />
-          <span className="text-[10px] font-medium uppercase tracking-wider">Chats</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider">Chats</span>
         </NavLink>
         <NavLink
           to="/timeline"
           className={({ isActive }) =>
             clsx(
-              "flex flex-col items-center gap-1 transition-colors",
+              "flex flex-col items-center gap-1 transition-all hover:scale-110",
               isActive ? "text-indigo-600" : "text-gray-400"
             )
           }
         >
           <Clock size={24} />
-          <span className="text-[10px] font-medium uppercase tracking-wider">Feed</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider">Feed</span>
         </NavLink>
         <NavLink
           to="/wallet"
           className={({ isActive }) =>
             clsx(
-              "flex flex-col items-center gap-1 transition-colors",
+              "flex flex-col items-center gap-1 transition-all hover:scale-110",
               isActive ? "text-indigo-600" : "text-gray-400"
             )
           }
         >
           <Wallet size={24} />
-          <span className="text-[10px] font-medium uppercase tracking-wider">Earnings</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider">Earnings</span>
         </NavLink>
         <NavLink
           to="/profile"
           className={({ isActive }) =>
             clsx(
-              "flex flex-col items-center gap-1 transition-colors",
+              "flex flex-col items-center gap-1 transition-all hover:scale-110",
               isActive ? "text-indigo-600" : "text-gray-400"
             )
           }
         >
           <User size={24} />
-          <span className="text-[10px] font-medium uppercase tracking-wider">Profile</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider">Profile</span>
         </NavLink>
       </nav>
     </div>

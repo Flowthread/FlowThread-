@@ -150,7 +150,7 @@ export default function Threads() {
   };
 
   return (
-    <div className="px-4 py-6">
+    <div className="px-4 py-6 sm:px-6 lg:px-8">
       <header className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Chats</h1>
@@ -281,8 +281,8 @@ export default function Threads() {
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-6 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4 sm:p-6 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar">
             <h3 className="mb-2 text-lg font-bold text-slate-900">Delete Chat?</h3>
             <p className="mb-6 text-sm text-slate-500">
               This will permanently remove this chat. This action cannot be undone.
@@ -308,8 +308,8 @@ export default function Threads() {
 
       {/* New Chat Modal */}
       {showNewChat && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-6 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 sm:p-6 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar">
             <h3 className="mb-4 text-xl font-bold text-slate-900">New Project Chat</h3>
             
             {error && (

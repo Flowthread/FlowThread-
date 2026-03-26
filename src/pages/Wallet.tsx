@@ -1,20 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
 import { db, auth, handleFirestoreError, OperationType } from "../firebase";
 import { doc, getDoc, updateDoc, collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import { UserProfile, Transaction } from "../types";
-import { Wallet as WalletIcon, ArrowDownLeft, ArrowUpRight, Plus, ExternalLink, CreditCard, AlertCircle, Loader2 } from "lucide-react";
+import { Wallet as WalletIcon, ArrowDownLeft, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 
 export default function Wallet() {
-  const [searchParams, setSearchParams] = useSearchParams();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [connecting, setConnecting] = useState(false);
-  const [stripeBalance, setStripeBalance] = useState<{ available: any[]; pending: any[] } | null>(null);
-  const [detailsSubmitted, setDetailsSubmitted] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!auth.currentUser) return;
@@ -22,11 +16,6 @@ export default function Wallet() {
     const unsubscribeProfile = onSnapshot(doc(db, "users", auth.currentUser.uid), (snapshot) => {
       const data = snapshot.data() as UserProfile;
       setProfile(data);
-      
-      // If we have a stripeAccountId, fetch balance
-      if (data?.stripeAccountId) {
-        fetchStripeBalance(data.stripeAccountId);
-      }
     });
 
     const q = query(
@@ -44,106 +33,16 @@ export default function Wallet() {
       (err) => handleFirestoreError(err, OperationType.LIST, "transactions")
     );
 
-    // Handle return from onboarding
-    const stripeAccountIdParam = searchParams.get("stripe_account_id");
-    if (stripeAccountIdParam && auth.currentUser) {
-      updateDoc(doc(db, "users", auth.currentUser.uid), {
-        stripeAccountId: stripeAccountIdParam,
-      }).then(() => {
-        const newParams = new URLSearchParams(searchParams);
-        newParams.delete("stripe_account_id");
-        setSearchParams(newParams);
-      });
-    }
-
     return () => {
       unsubscribeProfile();
       unsubscribeTransactions();
     };
-  }, [searchParams, setSearchParams]);
-
-  const fetchStripeBalance = async (accountId: string) => {
-    try {
-      const response = await fetch(`/api/get-stripe-balance/${accountId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setStripeBalance(data.balance);
-        setDetailsSubmitted(data.details_submitted);
-      }
-    } catch (err) {
-      console.error("Error fetching Stripe balance", err);
-    }
-  };
-
-  const handleConnectStripe = async () => {
-    if (!auth.currentUser) return;
-    setConnecting(true);
-    setError(null);
-    try {
-      if (profile?.stripeAccountId && detailsSubmitted) {
-        // Create login link for existing account that is fully onboarded
-        const response = await fetch("/api/create-stripe-login-link", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accountId: profile.stripeAccountId }),
-        });
-        
-        if (!response.ok) {
-          const errData = await response.json();
-          if (errData.error === "onboarding_incomplete") {
-            // Fall through to onboarding logic
-            await startOnboarding(profile.stripeAccountId);
-          } else {
-            throw new Error(errData.message || "Failed to create dashboard link");
-          }
-        } else {
-          const { url } = await response.json();
-          window.open(url, "_blank");
-        }
-      } else {
-        // Start or resume onboarding
-        await startOnboarding(profile?.stripeAccountId);
-      }
-    } catch (err: any) {
-      console.error("Stripe Connect error", err);
-      setError(err.message || "Failed to connect with Stripe");
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  const startOnboarding = async (existingAccountId?: string) => {
-    if (!auth.currentUser) return;
-    const response = await fetch("/api/create-connect-account", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        email: auth.currentUser.email,
-        accountId: existingAccountId
-      }),
-    });
-    
-    if (!response.ok) throw new Error("Failed to start onboarding");
-    
-    const { url, accountId } = await response.json();
-    
-    // Save accountId to user profile immediately if it's new
-    if (!existingAccountId) {
-      await updateDoc(doc(db, "users", auth.currentUser.uid), {
-        stripeAccountId: accountId,
-      });
-    }
-
-    // Open onboarding in new tab
-    window.open(url, "_blank");
-  };
+  }, []);
 
   const totalRevenue = transactions.reduce((sum, t) => sum + t.amount, 0);
-  const availableBalance = stripeBalance?.available?.[0]?.amount / 100 || 0;
-  const pendingBalance = stripeBalance?.pending?.[0]?.amount / 100 || 0;
 
   return (
-    <div className="px-4 py-6">
+    <div className="px-4 py-6 sm:px-6 lg:px-8">
       <header className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Earnings</h1>
         <p className="text-sm text-gray-500">Manage your earnings and payments</p>
@@ -165,51 +64,9 @@ export default function Wallet() {
           
           {profile?.role === "freelancer" && (
             <div className="space-y-4">
-              {stripeBalance && (
-                <div className="grid grid-cols-2 gap-4 rounded-2xl bg-white/10 p-4 backdrop-blur-md">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-200">Available</p>
-                    <p className="text-xl font-black">${availableBalance.toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-200">Pending</p>
-                    <p className="text-xl font-black">${pendingBalance.toLocaleString()}</p>
-                  </div>
-                </div>
-              )}
-
-              {error && (
-                <div className="flex items-center gap-2 rounded-xl bg-red-500/20 p-3 text-xs font-medium text-red-100 backdrop-blur-sm">
-                  <AlertCircle size={14} />
-                  {error}
-                </div>
-              )}
-
-              <button
-                onClick={handleConnectStripe}
-                disabled={connecting}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-4 font-bold text-indigo-600 transition-all active:scale-95 disabled:opacity-50"
-              >
-                {connecting ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : profile.stripeAccountId ? (
-                  <>
-                    <CreditCard size={18} />
-                    {detailsSubmitted ? "Withdraw" : "Complete Onboarding"}
-                  </>
-                ) : (
-                  <>
-                    <Plus size={18} />
-                    Connect
-                  </>
-                )}
-              </button>
-              
-              {profile.stripeAccountId && (
-                <p className="text-center text-[10px] font-medium text-indigo-200">
-                  Withdrawals are managed through your Stripe Express dashboard.
-                </p>
-              )}
+              <p className="text-center text-[10px] font-medium text-indigo-200">
+                Earnings are recorded after you confirm receipt of manual payments from clients.
+              </p>
             </div>
           )}
         </div>
@@ -233,9 +90,9 @@ export default function Wallet() {
             <p className="max-w-[180px] text-xs text-gray-500">Your earnings will appear here after projects are paid.</p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {transactions.map((t) => (
-              <div key={t.id} className="flex items-center gap-4 rounded-3xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+              <div key={t.id} className="flex items-center gap-4 rounded-3xl bg-white p-4 shadow-sm ring-1 ring-gray-100 transition-all hover:shadow-md">
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
                   <ArrowDownLeft size={24} />
                 </div>

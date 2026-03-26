@@ -14,7 +14,6 @@
 //   - location: string (optional, 0-200 chars) - User location
 //   - portfolioUrl: string (optional, URL format) - Portfolio link
 //   - skills: list (optional, max 10) - Freelancer skills
-//   - stripeAccountId: string (optional) - Stripe ID (PII)
 //   - createdAt: timestamp (required, immutable) - Creation time
 //   - darkMode: bool (optional) - Dark mode preference
 //   - pushNotifications: bool (optional) - Push notifications preference
@@ -145,7 +144,11 @@ service cloud.firestore {
              (!('skills' in data) || (data.skills is list && data.skills.size() <= 10)) &&
              (!('darkMode' in data) || data.darkMode is bool) &&
              (!('pushNotifications' in data) || data.pushNotifications is bool) &&
-             (!('emailNotifications' in data) || data.emailNotifications is bool);
+             (!('emailNotifications' in data) || data.emailNotifications is bool) &&
+             (!('rating' in data) || data.rating is number) &&
+             (!('ratingCount' in data) || data.ratingCount is number) &&
+             (!('banned' in data) || data.banned is bool) &&
+             (!('disputeCount' in data) || data.disputeCount is number);
     }
 
     function isValidThread(data) {
@@ -187,11 +190,19 @@ service cloud.firestore {
              data.description is string && data.description.size() >= 1 && data.description.size() <= 2000 &&
              data.price is number && data.price > 0 &&
              data.deadline is timestamp &&
-             data.status in ['pending', 'paid', 'delivered'] &&
+             data.status in ['pending', 'waiting_payment_details', 'waiting_client_confirmation', 'waiting_freelancer_confirmation', 'in_progress', 'delivered', 'completed', 'disputed'] &&
              data.clientId is string && data.freelancerId is string &&
-             data.threadId is string && data.creatorId == request.auth.uid &&
+             data.threadId is string && data.creatorId is string &&
              data.createdAt is timestamp &&
-             (!('deliveryUrl' in data) || data.deliveryUrl == null || data.deliveryUrl == "" || isValidUrl(data.deliveryUrl));
+             (!('deliveryUrl' in data) || data.deliveryUrl == null || data.deliveryUrl == "" || isValidUrl(data.deliveryUrl)) &&
+             (!('deliveryType' in data) || data.deliveryType is string) &&
+             (!('deliveryFileName' in data) || data.deliveryFileName is string) &&
+             (!('paymentMethod' in data) || data.paymentMethod is string) &&
+             (!('clientVote' in data) || data.clientVote is string) &&
+             (!('freelancerVote' in data) || data.freelancerVote is string) &&
+             (!('freelancerPaymentDetails' in data) || data.freelancerPaymentDetails is string) &&
+             (!('paidAt' in data) || data.paidAt is timestamp) &&
+             (!('completedAt' in data) || data.completedAt is timestamp);
     }
 
     function isValidWorkPost(data) {
@@ -204,6 +215,16 @@ service cloud.firestore {
              data.status in ['open', 'closed'] &&
              data.createdAt is timestamp &&
              (!('category' in data) || (data.category is string && data.category.size() <= 100));
+    }
+
+    function isValidTimelineEvent(data) {
+      return data.keys().hasAll(['type', 'title', 'description', 'timestamp', 'userId']) &&
+             data.type is string && data.type.size() >= 1 && data.type.size() <= 50 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+             data.description is string && data.description.size() >= 1 && data.description.size() <= 5000 &&
+             data.timestamp is timestamp &&
+             data.userId == request.auth.uid &&
+             (!('metadata' in data) || data.metadata is map);
     }
 
     function isValidNotification(data) {
@@ -225,6 +246,17 @@ service cloud.firestore {
              (!('title' in data) || (data.title is string && data.title.size() <= 200));
     }
 
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['taskId', 'amount', 'fee', 'status', 'fromId', 'toId', 'createdAt']) &&
+             data.taskId is string && data.taskId.size() >= 1 && data.taskId.size() <= 128 &&
+             data.amount is number && data.amount > 0 &&
+             data.fee is number && data.fee >= 0 &&
+             data.status in ['completed', 'pending', 'failed'] &&
+             data.fromId is string && data.fromId.size() <= 128 &&
+             data.toId is string && data.toId.size() <= 128 &&
+             data.createdAt is timestamp;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -238,8 +270,9 @@ service cloud.firestore {
       // Allow authenticated users to read any profile (for participant info)
       allow read: if isAuthenticated();
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if isOwner(userId) && isValidUser(request.resource.data) 
-                    && request.resource.data.createdAt == resource.data.createdAt;
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) 
+                    && request.resource.data.createdAt == resource.data.createdAt
+                    && (isOwner(userId) || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'ratingCount', 'disputeCount', 'banned']));
       allow delete: if isOwner(userId);
 
       match /notifications/{notificationId} {
@@ -285,11 +318,24 @@ service cloud.firestore {
                       && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants
                       && request.resource.data.clientId == get(/databases/$(database)/documents/threads/$(threadId)).data.clientId
                       && request.resource.data.freelancerId == get(/databases/$(database)/documents/threads/$(threadId)).data.freelancerId
+                      && request.resource.data.creatorId == request.auth.uid
                       && isValidTask(request.resource.data);
         allow update: if isAuthenticated() 
                       && (request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants || isAdmin())
                       && isValidTask(request.resource.data)
-                      && request.resource.data.createdAt == resource.data.createdAt;
+                      && request.resource.data.createdAt == resource.data.createdAt
+                      && request.resource.data.creatorId == resource.data.creatorId
+                      && request.resource.data.clientId == resource.data.clientId
+                      && request.resource.data.freelancerId == resource.data.freelancerId
+                      && request.resource.data.threadId == resource.data.threadId;
+        allow delete: if isAuthenticated() && (request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants || isAdmin());
+      }
+
+      match /timeline/{eventId} {
+        allow read: if isAuthenticated() && (request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants || isAdmin());
+        allow create: if isAuthenticated() 
+                      && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants
+                      && isValidTimelineEvent(request.resource.data);
       }
     }
 
@@ -314,7 +360,8 @@ service cloud.firestore {
 
     match /transactions/{transactionId} {
       allow read: if isAuthenticated() && (request.auth.uid == resource.data.fromId || request.auth.uid == resource.data.toId || isAdmin());
-      allow create, update, delete: if false;
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.fromId || request.auth.uid == request.resource.data.toId) && isValidTransaction(request.resource.data);
+      allow update, delete: if false;
     }
 
     match /invites/{inviteId} {
@@ -322,6 +369,21 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.resource.data.inviterId == request.auth.uid && isValidInvite(request.resource.data);
       allow update: if isAuthenticated() && (resource.data.inviterId == request.auth.uid || resource.data.inviteeEmail == request.auth.token.email) && isValidInvite(request.resource.data);
       allow delete: if isAuthenticated() && resource.data.inviterId == request.auth.uid;
+    }
+
+    function isValidRating(data) {
+      return data.keys().hasAll(['raterId', 'ratedUserId', 'taskId', 'stars', 'createdAt']) &&
+             data.raterId == request.auth.uid &&
+             data.ratedUserId is string &&
+             data.taskId is string &&
+             data.stars is number && data.stars >= 1 && data.stars <= 5 &&
+             data.createdAt is timestamp;
+    }
+
+    match /ratings/{ratingId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidRating(request.resource.data);
+      allow update, delete: if false;
     }
 
     match /feedback/{feedbackId} {

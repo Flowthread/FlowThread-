@@ -8,7 +8,6 @@ export interface UserProfile {
   email: string;
   photoURL: string;
   role: UserRole;
-  stripeAccountId?: string;
   demoMode?: boolean;
   createdAt: Timestamp;
   pushNotifications?: boolean;
@@ -19,6 +18,10 @@ export interface UserProfile {
   bio?: string;
   portfolioUrl?: string;
   onboardingCompleted?: boolean;
+  rating?: number;
+  ratingCount?: number;
+  banned?: boolean;
+  disputeCount?: number;
 }
 
 export interface Thread {
@@ -50,7 +53,15 @@ export interface Message {
   edited?: boolean;
 }
 
-export type TaskStatus = "pending" | "paid" | "delivered" | "completed";
+export type TaskStatus = 
+  | "pending" 
+  | "waiting_payment_details" 
+  | "waiting_client_confirmation" 
+  | "waiting_freelancer_confirmation" 
+  | "in_progress" 
+  | "delivered" 
+  | "completed"
+  | "disputed";
 
 export interface Task {
   id: string;
@@ -62,10 +73,24 @@ export interface Task {
   deliveryUrl?: string;
   deliveryType?: string;
   deliveryFileName?: string;
+  paymentMethod?: string;
+  freelancerPaymentDetails?: string;
+  paymentProofUrl?: string;
   threadId: string;
   creatorId: string;
   clientId: string;
   freelancerId: string;
+  createdAt: Timestamp;
+  clientVote?: string;
+  freelancerVote?: string;
+}
+
+export interface Rating {
+  id: string;
+  raterId: string;
+  ratedUserId: string;
+  taskId: string;
+  stars: number;
   createdAt: Timestamp;
 }
 
@@ -114,4 +139,14 @@ export interface Notification {
   link: string;
   read: boolean;
   createdAt: Timestamp;
+}
+
+export interface TimelineEvent {
+  id: string;
+  type: 'message' | 'task_created' | 'task_status_changed' | 'payment' | 'freelancer_update' | 'milestone_achieved';
+  title: string;
+  description: string;
+  timestamp: Timestamp;
+  userId: string;
+  metadata?: any;
 }

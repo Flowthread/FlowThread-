@@ -1,23 +1,23 @@
 import React from 'react';
 
-export const Logo: React.FC<{ variant?: 'full' | 'icon', className?: string }> = ({ variant = 'full', className = '' }) => {
-  // Use a reliable free image placeholder (FlowThread text as fallback)
-  if (variant === 'full') {
+interface LogoProps extends React.SVGProps<SVGSVGElement> {
+  variant?: 'full' | 'icon';
+  className?: string;
+}
+
+export function Logo({ variant = 'full', className, ...props }: LogoProps) {
+  if (variant === 'icon') {
     return (
-      <div className={`flex flex-col items-center ${className}`}>
-        <img 
-          src="https://placehold.co/400x200/2D7AFF/white?text=FlowThread"
-          alt="FlowThread"
-          className="w-full max-w-[280px] h-auto"
-        />
+      <div className={`flex items-center justify-center bg-blue-600 rounded-lg text-white font-bold ${className}`} style={{ width: '40px', height: '40px' }}>
+        FT
       </div>
     );
   }
+
   return (
-    <img 
-      src="https://placehold.co/32x32/2D7AFF/white?text=FT"
-      alt="FlowThread"
-      className="h-8 w-auto"
-    />
+    <div className={`flex items-center gap-2 font-sans ${className}`}>
+      <span className="text-2xl font-bold text-gray-900 dark:text-white">FlowThread</span>
+      <span className="h-2 w-2 rounded-full bg-blue-600 mb-1"></span>
+    </div>
   );
-};
+}
