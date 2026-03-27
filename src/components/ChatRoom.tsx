@@ -17,12 +17,27 @@ import {
   getDocs,
 } from "firebase/firestore";
 import { Message, Task, UserProfile, Notification, TimelineEvent } from "../types";
-import { Send, Plus, X, Calendar, DollarSign, CheckCircle2, ExternalLink, Loader2, Sparkles, Trash2, FileText, MapPin, Globe, Briefcase, MoreVertical, Edit2, Check, CheckCheck, History, MessageSquare, CreditCard, Star, AlertTriangle } from "lucide-react";
+import { Send, Plus, X, Calendar, DollarSign, CheckCircle2, ExternalLink, Loader2, Sparkles, Trash2, FileText, MapPin, Globe, Briefcase, MoreVertical, Edit2, Check, CheckCheck, History, MessageSquare, CreditCard, Star, AlertTriangle, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { format, addDays, parseISO, isValid } from "date-fns";
 import { clsx } from "clsx";
 import { GoogleGenAI, Type } from "@google/genai";
 import { toast } from "sonner";
+
+const PAYMENT_METHODS = [
+  "Google Pay",
+  "Apple Pay",
+  "Stripe",
+  "PayPal",
+  "Cash App",
+  "Venmo",
+  "JazzCash",
+  "Easypaisa",
+  "NayaPay",
+  "SadaPay",
+  "Credit Card",
+  "Other"
+];
 
 export default function ChatRoom() {
   const { threadId } = useParams<{ threadId: string }>();
@@ -1324,26 +1339,21 @@ Message: "${message.text}"`;
                 {isParticipant && item.status === "pending" && thread?.clientId && thread?.freelancerId && (
                   <div className="mt-4 space-y-3">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Vote for Payment Method</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {["JazzCash", "Easypaisa", "SadaPay", "Bank Transfer", "Other"].map((method) => {
-                        const myVote = userProfile?.role === "client" ? item.clientVote : item.freelancerVote;
-                        const isSelected = myVote === method;
-                        return (
-                          <button
-                            key={method}
-                            onClick={() => handleVotePaymentMethod(item.id, method)}
-                            disabled={isSubmitting}
-                            className={clsx(
-                              "rounded-xl border px-2 py-2 text-[10px] font-bold transition-all",
-                              isSelected 
-                                ? "border-indigo-600 bg-indigo-50 text-indigo-700" 
-                                : "border-gray-100 bg-gray-50 text-gray-700 hover:border-indigo-600 hover:text-indigo-600"
-                            )}
-                          >
-                            {method}
-                          </button>
-                        );
-                      })}
+                    <div className="relative">
+                      <select
+                        value={userProfile?.role === "client" ? item.clientVote || "" : item.freelancerVote || ""}
+                        onChange={(e) => handleVotePaymentMethod(item.id, e.target.value)}
+                        disabled={isSubmitting}
+                        className="w-full rounded-xl border-none bg-gray-50 px-4 py-3 text-[10px] font-bold text-gray-700 outline-none ring-1 ring-gray-200 focus:ring-2 focus:ring-indigo-500 appearance-none"
+                      >
+                        <option value="" disabled>Select Payment Method</option>
+                        {PAYMENT_METHODS.map((method) => (
+                          <option key={method} value={method}>{method}</option>
+                        ))}
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-400">
+                        <ChevronDown size={14} />
+                      </div>
                     </div>
                     <div className="flex justify-between text-[10px] text-gray-500 mt-2">
                       <span>Client Vote: <strong className="text-gray-900">{item.clientVote || "Waiting..."}</strong></span>

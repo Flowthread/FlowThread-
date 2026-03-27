@@ -58,7 +58,7 @@ export default function Admin() {
         getDocs(collection(db, "workPosts"))
       ]);
 
-      setUsers(usersSnap.docs.map(d => ({ id: d.id, ...d.data() } as unknown as UserProfile)));
+      setUsers(usersSnap.docs.map(d => ({ ...d.data() } as UserProfile)));
       setThreads(threadsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Thread)));
       setTasks(tasksSnap.docs.map(d => ({ id: d.id, ...d.data() } as Task)));
       setWorkPosts(workPostsSnap.docs.map(d => ({ id: d.id, ...d.data() } as WorkPost)));
