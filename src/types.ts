@@ -61,7 +61,8 @@ export type TaskStatus =
   | "in_progress" 
   | "delivered" 
   | "completed"
-  | "disputed";
+  | "disputed"
+  | "cancelled";
 
 export interface Task {
   id: string;

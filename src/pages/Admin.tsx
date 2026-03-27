@@ -2,8 +2,8 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { db, auth, handleFirestoreError, OperationType } from "../firebase";
 import { collection, query, getDocs, updateDoc, doc, where, collectionGroup } from "firebase/firestore";
-import { UserProfile, Thread, Task, WorkPost } from "../types";
-import { Shield, Users, MessageSquare, Briefcase, AlertTriangle, BarChart3, Search, CheckCircle, XCircle } from "lucide-react";
+import { UserProfile, Thread, Task, WorkPost, Message } from "../types";
+import { Shield, Users, MessageSquare, Briefcase, AlertTriangle, BarChart3, Search, CheckCircle, XCircle, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -19,6 +19,15 @@ export default function Admin() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [workPosts, setWorkPosts] = useState<WorkPost[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  
+  // Task filter
+  const [taskStatusFilter, setTaskStatusFilter] = useState<string>("all");
+
+  // Thread Modal
+  const [selectedThread, setSelectedThread] = useState<Thread | null>(null);
+  const [threadMessages, setThreadMessages] = useState<Message[]>([]);
+  const [threadTasks, setThreadTasks] = useState<Task[]>([]);
+  const [loadingThreadDetails, setLoadingThreadDetails] = useState(false);
 
   useEffect(() => {
     const checkAdmin = async () => {
@@ -27,10 +36,7 @@ export default function Admin() {
         return;
       }
       
-      const userDoc = await getDocs(query(collection(db, "users"), where("uid", "==", auth.currentUser.uid)));
-      const userData = userDoc.docs[0]?.data() as UserProfile | undefined;
-      
-      if (auth.currentUser.email === "mahjabeenismail5@gmail.com" || userData?.role === "admin") {
+      if (auth.currentUser.email === "mahjabeenismail5@gmail.com") {
         setIsAdmin(true);
         fetchData();
       } else {
@@ -86,6 +92,24 @@ export default function Admin() {
     }
   };
 
+  const handleViewThread = async (thread: Thread) => {
+    setSelectedThread(thread);
+    setLoadingThreadDetails(true);
+    try {
+      const [msgsSnap, tasksSnap] = await Promise.all([
+        getDocs(collection(db, "threads", thread.id, "messages")),
+        getDocs(collection(db, "threads", thread.id, "tasks"))
+      ]);
+      setThreadMessages(msgsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Message)).sort((a, b) => a.createdAt?.toMillis() - b.createdAt?.toMillis()));
+      setThreadTasks(tasksSnap.docs.map(d => ({ id: d.id, ...d.data() } as Task)));
+    } catch (err) {
+      console.error("Error fetching thread details", err);
+      toast.error("Failed to load thread details");
+    } finally {
+      setLoadingThreadDetails(false);
+    }
+  };
+
   if (loading) {
     return <div className="flex h-screen items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent"></div></div>;
   }
@@ -93,7 +117,10 @@ export default function Admin() {
   if (!isAdmin) return null;
 
   const filteredUsers = users.filter(u => u.email?.toLowerCase().includes(searchQuery.toLowerCase()) || u.displayName?.toLowerCase().includes(searchQuery.toLowerCase()));
-  const disputedTasks = tasks.filter(t => t.status === "disputed");
+  const disputedTasks = tasks.filter(t => t.status?.includes("dispute") || (t as any).freelancerPaymentDispute === true);
+  const filteredTasks = tasks.filter(t => taskStatusFilter === "all" || t.status === taskStatusFilter);
+
+  const completedTasksCount = tasks.filter(t => t.status === "completed").length;
 
   const analyticsData = [
     { name: 'Users', count: users.length },
@@ -102,10 +129,18 @@ export default function Admin() {
     { name: 'Work Posts', count: workPosts.length },
   ];
 
+  const taskStatusData = [
+    { name: 'Pending', count: tasks.filter(t => t.status === 'pending').length },
+    { name: 'In Progress', count: tasks.filter(t => t.status === 'in_progress').length },
+    { name: 'Delivered', count: tasks.filter(t => t.status === 'delivered').length },
+    { name: 'Completed', count: tasks.filter(t => t.status === 'completed').length },
+    { name: 'Disputed', count: tasks.filter(t => t.status === 'disputed').length },
+  ].filter(d => d.count > 0);
+
   return (
     <div className="flex h-screen bg-slate-50">
       {/* Sidebar */}
-      <div className="w-64 bg-white border-r border-slate-200 flex flex-col">
+      <div className="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0">
         <div className="p-6 border-b border-slate-200 flex items-center gap-3">
           <Shield className="text-indigo-600" size={24} />
           <h1 className="font-bold text-xl text-slate-900">Admin</h1>
@@ -144,13 +179,21 @@ export default function Admin() {
       <div className="flex-1 overflow-auto p-8">
         {activeTab === "analytics" && (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-slate-900">Dashboard Overview</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-slate-900">Dashboard Overview</h2>
+              <button 
+                onClick={fetchData}
+                className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Refresh Data
+              </button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {[
                 { label: "Total Users", value: users.length, icon: Users, color: "text-blue-600", bg: "bg-blue-50" },
-                { label: "Active Threads", value: threads.length, icon: MessageSquare, color: "text-indigo-600", bg: "bg-indigo-50" },
+                { label: "Total Threads", value: threads.length, icon: MessageSquare, color: "text-indigo-600", bg: "bg-indigo-50" },
                 { label: "Total Tasks", value: tasks.length, icon: Briefcase, color: "text-emerald-600", bg: "bg-emerald-50" },
-                { label: "Active Disputes", value: disputedTasks.length, icon: AlertTriangle, color: "text-rose-600", bg: "bg-rose-50" },
+                { label: "Completed Tasks", value: completedTasksCount, icon: CheckCircle, color: "text-purple-600", bg: "bg-purple-50" },
               ].map(stat => (
                 <div key={stat.label} className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4">
                   <div className={`h-14 w-14 rounded-2xl flex items-center justify-center ${stat.bg} ${stat.color}`}>
@@ -163,20 +206,40 @@ export default function Admin() {
                 </div>
               ))}
             </div>
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 h-96">
-              <h3 className="text-lg font-bold text-slate-900 mb-6">Platform Growth</h3>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={analyticsData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                  <YAxis axisLine={false} tickLine={false} />
-                  <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                  <Bar dataKey="count" fill="#4f46e5" radius={[8, 8, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+                <h3 className="text-lg font-bold text-slate-900 mb-6">Platform Entities</h3>
+                <div style={{ width: '100%', height: 300 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={analyticsData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                      <YAxis axisLine={false} tickLine={false} />
+                      <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                      <Bar dataKey="count" fill="#4f46e5" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+                <h3 className="text-lg font-bold text-slate-900 mb-6">Tasks by Status</h3>
+                <div style={{ width: '100%', height: 300 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={taskStatusData} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                      <XAxis type="number" axisLine={false} tickLine={false} />
+                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} width={100} />
+                      <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                      <Bar dataKey="count" fill="#10b981" radius={[0, 8, 8, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </div>
           </div>
-        )}
+        ) || null}
 
         {activeTab === "users" && (
           <div className="space-y-6">
@@ -198,8 +261,10 @@ export default function Admin() {
                 <thead className="bg-slate-50 text-slate-500 font-medium">
                   <tr>
                     <th className="px-6 py-4">User</th>
+                    <th className="px-6 py-4">UID</th>
                     <th className="px-6 py-4">Role</th>
                     <th className="px-6 py-4">Rating</th>
+                    <th className="px-6 py-4">Disputes</th>
                     <th className="px-6 py-4">Status</th>
                     <th className="px-6 py-4 text-right">Actions</th>
                   </tr>
@@ -216,10 +281,12 @@ export default function Admin() {
                           </div>
                         </div>
                       </td>
+                      <td className="px-6 py-4 font-mono text-xs text-slate-500">{user.uid}</td>
                       <td className="px-6 py-4">
                         <span className="capitalize px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-bold">{user.role}</span>
                       </td>
                       <td className="px-6 py-4 font-medium text-slate-700">{user.rating?.toFixed(1) || 'N/A'}</td>
+                      <td className="px-6 py-4 font-medium text-slate-700">{user.disputeCount || 0}</td>
                       <td className="px-6 py-4">
                         {user.banned ? (
                           <span className="px-3 py-1 bg-rose-100 text-rose-600 rounded-full text-xs font-bold">Banned</span>
@@ -254,20 +321,21 @@ export default function Admin() {
                       <h3 className="font-bold text-slate-900">{thread.title}</h3>
                       <p className="text-xs text-slate-500">ID: {thread.id}</p>
                     </div>
-                    <span className="text-xs text-slate-400">{formatDistanceToNow(thread.updatedAt.toDate())} ago</span>
+                    <span className="text-xs text-slate-400">{thread.updatedAt ? formatDistanceToNow(thread.updatedAt.toDate()) : 'Unknown'} ago</span>
                   </div>
                   <div className="bg-slate-50 p-4 rounded-2xl mb-4">
-                    <p className="text-sm text-slate-600 line-clamp-2">"{thread.lastMessage}"</p>
+                    <p className="text-sm text-slate-600 line-clamp-2">"{thread.lastMessage || 'No messages yet'}"</p>
                   </div>
-                  <div className="flex gap-2 text-xs text-slate-500 mb-4">
-                    <span className="bg-slate-100 px-2 py-1 rounded-md">Client: {thread.clientId}</span>
-                    <span className="bg-slate-100 px-2 py-1 rounded-md">Freelancer: {thread.freelancerId}</span>
+                  <div className="flex flex-wrap gap-2 text-xs text-slate-500 mb-4">
+                    <span className="bg-slate-100 px-2 py-1 rounded-md">Participants: {thread.participants?.length || 0}</span>
+                    {thread.clientId && <span className="bg-slate-100 px-2 py-1 rounded-md">Client: {thread.clientId}</span>}
+                    {thread.freelancerId && <span className="bg-slate-100 px-2 py-1 rounded-md">Freelancer: {thread.freelancerId}</span>}
                   </div>
                   <button 
-                    onClick={() => navigate(`/threads/${thread.id}`)}
+                    onClick={() => handleViewThread(thread)}
                     className="w-full py-2 bg-indigo-50 text-indigo-600 font-bold rounded-xl hover:bg-indigo-100 transition-colors text-sm"
                   >
-                    View Thread
+                    View Details
                   </button>
                 </div>
               ))}
@@ -277,7 +345,21 @@ export default function Admin() {
 
         {activeTab === "tasks" && (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-slate-900">All Tasks</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-slate-900">All Tasks</h2>
+              <select
+                value={taskStatusFilter}
+                onChange={(e) => setTaskStatusFilter(e.target.value)}
+                className="px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="all">All Statuses</option>
+                <option value="pending">Pending</option>
+                <option value="in_progress">In Progress</option>
+                <option value="delivered">Delivered</option>
+                <option value="completed">Completed</option>
+                <option value="disputed">Disputed</option>
+              </select>
+            </div>
             <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 text-slate-500 font-medium">
@@ -286,10 +368,11 @@ export default function Admin() {
                     <th className="px-6 py-4">Price</th>
                     <th className="px-6 py-4">Status</th>
                     <th className="px-6 py-4">Thread ID</th>
+                    <th className="px-6 py-4">Participants</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {tasks.map(task => (
+                  {filteredTasks.map(task => (
                     <tr key={task.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-6 py-4">
                         <p className="font-bold text-slate-900">{task.title}</p>
@@ -303,10 +386,14 @@ export default function Admin() {
                           task.status === 'in_progress' ? 'bg-blue-100 text-blue-600' :
                           'bg-slate-100 text-slate-600'
                         }`}>
-                          {task.status.replace('_', ' ')}
+                          {task.status?.replace(/_/g, ' ') || 'Unknown'}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-xs text-slate-500 font-mono">{task.threadId}</td>
+                      <td className="px-6 py-4 text-xs text-slate-500">
+                        <p>C: {task.clientId}</p>
+                        <p>F: {task.freelancerId}</p>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -367,6 +454,80 @@ export default function Admin() {
           </div>
         )}
       </div>
+
+      {/* Thread Details Modal */}
+      {selectedThread && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">{selectedThread.title}</h2>
+                <p className="text-sm text-slate-500 font-mono">ID: {selectedThread.id}</p>
+              </div>
+              <button 
+                onClick={() => setSelectedThread(null)}
+                className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+              >
+                <X size={24} className="text-slate-500" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-auto p-6 flex flex-col md:flex-row gap-6">
+              {loadingThreadDetails ? (
+                <div className="flex-1 flex items-center justify-center">
+                  <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent"></div>
+                </div>
+              ) : (
+                <>
+                  {/* Messages Column */}
+                  <div className="flex-1 space-y-4">
+                    <h3 className="font-bold text-slate-900 border-b border-slate-100 pb-2">Messages ({threadMessages.length})</h3>
+                    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                      {threadMessages.length === 0 ? (
+                        <p className="text-sm text-slate-500 italic">No messages in this thread.</p>
+                      ) : (
+                        threadMessages.map(msg => (
+                          <div key={msg.id} className="bg-slate-50 p-3 rounded-2xl">
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="font-bold text-sm text-slate-900">{msg.senderName}</span>
+                              <span className="text-[10px] text-slate-400">
+                                {msg.createdAt ? formatDistanceToNow(msg.createdAt.toDate()) : 'Unknown'} ago
+                              </span>
+                            </div>
+                            <p className="text-sm text-slate-700">{msg.text}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Tasks Column */}
+                  <div className="w-full md:w-1/3 space-y-4">
+                    <h3 className="font-bold text-slate-900 border-b border-slate-100 pb-2">Tasks ({threadTasks.length})</h3>
+                    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                      {threadTasks.length === 0 ? (
+                        <p className="text-sm text-slate-500 italic">No tasks in this thread.</p>
+                      ) : (
+                        threadTasks.map(task => (
+                          <div key={task.id} className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm">
+                            <h4 className="font-bold text-sm text-slate-900 mb-1">{task.title}</h4>
+                            <div className="flex justify-between items-center mt-2">
+                              <span className="font-bold text-indigo-600">${task.price}</span>
+                              <span className="text-[10px] font-bold px-2 py-1 bg-slate-100 rounded-full uppercase">
+                                {task.status?.replace(/_/g, ' ')}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

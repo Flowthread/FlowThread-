@@ -503,6 +503,27 @@ export default function Profile() {
           </div>
         </section>
 
+        {/* ADMIN */}
+        {auth.currentUser?.email === "mahjabeenismail5@gmail.com" && (
+          <section>
+            <h3 className="mb-3 px-4 text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-400">Administration</h3>
+            <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-indigo-100">
+              <button 
+                onClick={() => navigate("/admin")}
+                className="flex w-full items-center justify-between p-4 transition-colors hover:bg-indigo-50"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                    <Shield size={20} />
+                  </div>
+                  <span className="font-bold text-slate-700">Admin Panel</span>
+                </div>
+                <ChevronRight size={20} className="text-slate-300" />
+              </button>
+            </div>
+          </section>
+        )}
+
         {/* SUPPORT */}
         <section>
           <h3 className="mb-3 px-4 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Support</h3>

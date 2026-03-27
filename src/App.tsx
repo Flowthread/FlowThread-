@@ -24,6 +24,7 @@ export default function App() {
             <Routes>
               <Route element={<Layout />}>
                 <Route path="/" element={<Navigate to="/threads" replace />} />
+                <Route path="/login" element={<Navigate to="/threads" replace />} />
                 <Route path="/threads" element={<Threads />} />
                 <Route path="/timeline" element={<Timeline />} />
                 <Route path="/wallet" element={<Wallet />} />
