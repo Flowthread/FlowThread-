@@ -13,6 +13,7 @@ import { useSearchParams, useLocation } from "react-router-dom";
 import { Loader2, AlertTriangle, Mail, Lock, User as UserIcon, Facebook } from "lucide-react";
 import { Logo } from "./Logo";
 import Onboarding from "./Onboarding";
+import LandingPage from "./LandingPage";
 import { toast } from "sonner";
 
 interface AuthGuardProps {
@@ -239,6 +240,9 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   }
 
   if (!user) {
+    if (location.pathname === "/") {
+      return <LandingPage />;
+    }
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-6 py-12 text-center transition-colors duration-200">
         <div className="mb-8 flex items-center justify-center">
