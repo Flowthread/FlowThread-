@@ -66,6 +66,8 @@ export default function ChatRoom() {
   const [updateText, setUpdateText] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const isParticipant = thread?.participants?.includes(auth.currentUser?.uid);
+
   const [newTask, setNewTask] = useState({
     title: "",
     description: "",
@@ -75,9 +77,13 @@ export default function ChatRoom() {
 
   // Mark messages as seen
   useEffect(() => {
-    if (!auth.currentUser || !threadId || messages.length === 0) return;
+    if (!auth.currentUser || !threadId || messages.length === 0 || !thread) return;
 
     const uid = auth.currentUser.uid;
+    
+    // Only mark as seen if the user is a participant
+    if (!thread.participants?.includes(uid)) return;
+
     const unseenMessages = messages.filter(m => 
       m.senderId !== uid && (!m.seenBy || !m.seenBy.includes(uid))
     );
@@ -95,7 +101,7 @@ export default function ChatRoom() {
         }
       });
     }
-  }, [messages, threadId]);
+  }, [messages, threadId, thread]);
 
   useEffect(() => {
     if (!auth.currentUser || !threadId) return;
@@ -1237,7 +1243,7 @@ Message: "${message.text}"`;
                 </div>
                 
                 {/* AI Suggestion Chip */}
-                {suggestion?.messageId === item.id && userProfile?.role === "client" && (
+                {isParticipant && suggestion?.messageId === item.id && userProfile?.role === "client" && (
                   <motion.button
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -1266,7 +1272,7 @@ Message: "${message.text}"`;
                 key={item.id}
                 className="mx-auto w-full max-w-xs rounded-2xl border border-gray-100 bg-white p-4 shadow-lg relative"
               >
-                {item.creatorId === auth.currentUser?.uid && (
+                {isParticipant && item.creatorId === auth.currentUser?.uid && (
                   <button
                     onClick={() => setShowDeleteTaskModal(item.id)}
                     className="absolute top-4 right-4 text-gray-300 hover:text-red-500 transition-colors"
@@ -1274,7 +1280,7 @@ Message: "${message.text}"`;
                     <Trash2 size={16} />
                   </button>
                 )}
-                {item.status !== "completed" && item.status !== "disputed" && item.status !== "pending" && (
+                {isParticipant && item.status !== "completed" && item.status !== "disputed" && item.status !== "pending" && (
                   <button
                     onClick={() => handleReportIssue(item.id)}
                     className="absolute top-4 right-10 text-gray-300 hover:text-red-500 transition-colors"
@@ -1315,7 +1321,7 @@ Message: "${message.text}"`;
                   </div>
                 </div>
 
-                {item.status === "pending" && thread?.clientId && thread?.freelancerId && (
+                {isParticipant && item.status === "pending" && thread?.clientId && thread?.freelancerId && (
                   <div className="mt-4 space-y-3">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Vote for Payment Method</p>
                     <div className="grid grid-cols-2 gap-2">
@@ -1346,7 +1352,7 @@ Message: "${message.text}"`;
                   </div>
                 )}
 
-                {item.status === "waiting_payment_details" && (
+                {isParticipant && item.status === "waiting_payment_details" && (
                   <div className="mt-4 rounded-xl bg-indigo-50 p-3 border border-indigo-100">
                     <div className="flex items-center gap-2 mb-2">
                       <CreditCard className="w-4 h-4 text-indigo-600" />
@@ -1376,7 +1382,7 @@ Message: "${message.text}"`;
                   </div>
                 )}
 
-                {item.status === "waiting_client_confirmation" && (
+                {isParticipant && item.status === "waiting_client_confirmation" && (
                   <div className="mt-4 rounded-xl bg-indigo-50 p-3 border border-indigo-100">
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
@@ -1402,7 +1408,7 @@ Message: "${message.text}"`;
                   </div>
                 )}
 
-                {item.status === "waiting_freelancer_confirmation" && (
+                {isParticipant && item.status === "waiting_freelancer_confirmation" && (
                   <div className="mt-4 rounded-xl bg-green-50 p-3 border border-green-100">
                     <div className="space-y-3">
                       <div className="flex items-center gap-2">
@@ -1436,7 +1442,7 @@ Message: "${message.text}"`;
                   </div>
                 )}
 
-                {userProfile?.role === "freelancer" && item.status === "in_progress" && (
+                {isParticipant && userProfile?.role === "freelancer" && item.status === "in_progress" && (
                   <button
                     onClick={() => setShowDeliverModal(item.id)}
                     className="mt-4 w-full rounded-xl bg-indigo-600 py-2 text-sm font-bold text-white transition-all active:scale-95"
@@ -1445,7 +1451,7 @@ Message: "${message.text}"`;
                   </button>
                 )}
 
-                {userProfile?.role === "client" && item.status === "delivered" && (
+                {isParticipant && userProfile?.role === "client" && item.status === "delivered" && (
                   <div className="mt-4 flex gap-2">
                     <button
                       onClick={() => setShowCompleteModal(item.id)}
@@ -1463,7 +1469,7 @@ Message: "${message.text}"`;
                   </div>
                 )}
 
-                {item.status === "delivered" && userProfile?.role === "freelancer" && (
+                {isParticipant && item.status === "delivered" && userProfile?.role === "freelancer" && (
                   <div className="mt-4 flex flex-col items-center justify-center gap-1 rounded-xl bg-gray-50 py-2 px-4 text-sm font-bold text-gray-900">
                     <div className="flex items-center gap-2">
                       <CheckCircle2 size={16} className="text-blue-500" />
@@ -1500,7 +1506,7 @@ Message: "${message.text}"`;
                         </span>
                       )}
                     </div>
-                    {!hasRatedTasks[item.id] && (
+                    {isParticipant && !hasRatedTasks[item.id] && (
                       <button
                         onClick={() => setShowRatingModal(item.id)}
                         className="w-full rounded-lg bg-yellow-500 py-2 text-[10px] font-bold text-white shadow-sm hover:bg-yellow-600 transition-all flex items-center justify-center gap-2"
@@ -1523,7 +1529,7 @@ Message: "${message.text}"`;
       {/* Timeline Area */}
       {activeTab === "timeline" && (
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 no-scrollbar bg-gray-50/30">
-          {userProfile?.role === "freelancer" && (
+          {isParticipant && userProfile?.role === "freelancer" && (
             <div className="mb-6 rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm">
               <h4 className="mb-2 text-[10px] font-bold uppercase tracking-wider text-indigo-600">Post Update</h4>
               <textarea
@@ -1600,7 +1606,7 @@ Message: "${message.text}"`;
       )}
 
       {/* Input Area */}
-      {activeTab === "chat" && (
+      {activeTab === "chat" && isParticipant && (
       <div className="border-t border-gray-100 p-4 sm:p-6 bg-white">
         <div className="flex items-center gap-2">
           <button

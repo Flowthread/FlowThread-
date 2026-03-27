@@ -10,6 +10,7 @@ import Notifications from "./pages/Notifications";
 import HelpCenter from "./pages/HelpCenter";
 import Feedback from "./pages/Feedback";
 import ChatRoom from "./components/ChatRoom";
+import Admin from "./pages/Admin";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { NotificationProvider } from "./components/NotificationProvider";
 import { Toaster } from "sonner";
@@ -32,6 +33,7 @@ export default function App() {
                 <Route path="/feedback" element={<Feedback />} />
               </Route>
               <Route path="/threads/:threadId" element={<ChatRoom />} />
+              <Route path="/admin" element={<Admin />} />
             </Routes>
           </AuthGuard>
         </Router>

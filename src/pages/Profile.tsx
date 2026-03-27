@@ -521,7 +521,7 @@ export default function Profile() {
             </button>
             <div className="h-px bg-slate-50 mx-4"></div>
             <button 
-              onClick={() => navigate("/feedback")}
+              onClick={() => window.open("https://docs.google.com/forms/d/e/1FAIpQLScUjiIqt_VI80KSOScl7wfkLi48tU3WTW1fBqjzT-onNQV4mA/viewform?usp=publish-editor", "_blank")}
               className="flex w-full items-center justify-between p-4 transition-colors hover:bg-slate-50"
             >
               <div className="flex items-center gap-3">
