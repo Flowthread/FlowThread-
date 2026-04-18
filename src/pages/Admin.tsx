@@ -7,6 +7,76 @@ import { Shield, Users, MessageSquare, Briefcase, AlertTriangle, BarChart3, Sear
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { suggestDisputeResolution } from "../services/aiService";
+import { Loader2, Sparkles } from "lucide-react";
+
+function AiDisputeResolver({ task }: { task: Task }) {
+  const [resolution, setResolution] = useState<{ summary: string; recommendation: string; reasoning: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleResolve = async () => {
+    setLoading(true);
+    try {
+      // Fetch thread messages
+      let chatHistory = "No chat messages found.";
+      if (task.threadId) {
+        const msgQuery = query(collection(db, "threads", task.threadId, "messages"));
+        const msgSnap = await getDocs(msgQuery);
+        if (!msgSnap.empty) {
+          chatHistory = msgSnap.docs.map(d => {
+            const m = d.data() as Message;
+            return `[${m.senderName || m.senderId}]: ${m.text}`;
+          }).join("\n");
+        }
+      }
+
+      const result = await suggestDisputeResolution(task.description, chatHistory, "General dispute or missing payment details");
+      if (result) {
+        setResolution(result);
+      }
+    } catch (error) {
+      toast.error("Failed to generate AI resolution.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (resolution) {
+    return (
+      <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-6 mt-4">
+        <div className="flex items-center gap-2 mb-4">
+          <Sparkles className="text-indigo-600" size={20} />
+          <h4 className="font-bold text-indigo-900">AI Dispute Analysis</h4>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">Summary</span>
+            <p className="text-sm text-indigo-900 mt-1">{resolution.summary}</p>
+          </div>
+          <div>
+            <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">Reasoning</span>
+            <p className="text-sm text-indigo-900 mt-1">{resolution.reasoning}</p>
+          </div>
+          <div className="bg-white rounded-xl p-4 border border-indigo-100">
+            <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">Recommendation</span>
+            <p className="font-bold text-indigo-600 mt-1">{resolution.recommendation}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={handleResolve}
+      disabled={loading}
+      className="w-full mt-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+    >
+      {loading ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
+      Analyze Dispute with AI
+    </button>
+  );
+}
 
 export default function Admin() {
   const navigate = useNavigate();
@@ -447,6 +517,8 @@ export default function Admin() {
                         Resolve for Client (Refund)
                       </button>
                     </div>
+                    
+                    <AiDisputeResolver task={task} />
                   </div>
                 ))}
               </div>

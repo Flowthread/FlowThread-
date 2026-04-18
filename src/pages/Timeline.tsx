@@ -22,6 +22,56 @@ import { Plus, Briefcase, Activity, X, DollarSign, Calendar, Tag, Loader2, Check
 import { useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import { toast } from "sonner";
+import { matchProject } from "../services/aiService";
+import { Sparkles } from "lucide-react";
+
+function MatchScoreBadge({ work, userProfile }: { work: WorkPost, userProfile: UserProfile | null }) {
+  const [scoreData, setScoreData] = useState<{ score: number, reason: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleMatch = async () => {
+    if (!userProfile) return;
+    setLoading(true);
+    try {
+      const profileString = `Role: ${userProfile.role}, Name: ${userProfile.displayName}`;
+      const projectString = `Title: ${work.title}, Category: ${work.category}, Description: ${work.description}`;
+      const result = await matchProject(projectString, profileString);
+      if (result) {
+        setScoreData(result);
+      }
+    } catch (error) {
+      toast.error("Failed to analyze match score.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (scoreData) {
+    const isGoodMatch = scoreData.score >= 70;
+    return (
+      <div className={clsx("mt-4 p-3 rounded-xl border text-sm", isGoodMatch ? "bg-emerald-50 border-emerald-100" : "bg-amber-50 border-amber-100")}>
+        <div className="flex items-center gap-2 mb-1">
+          <Sparkles size={16} className={isGoodMatch ? "text-emerald-600" : "text-amber-600"} />
+          <span className={clsx("font-bold", isGoodMatch ? "text-emerald-700" : "text-amber-700")}>
+            {scoreData.score}% AI Match Match
+          </span>
+        </div>
+        <p className={clsx("text-xs", isGoodMatch ? "text-emerald-600" : "text-amber-600")}>{scoreData.reason}</p>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={handleMatch}
+      disabled={loading}
+      className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-50 py-3 text-xs font-bold text-indigo-600 transition-colors hover:bg-indigo-100 disabled:opacity-50"
+    >
+      {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+      Calculate AI Match Score
+    </button>
+  );
+}
 
 export default function Timeline() {
   const [activeTab, setActiveTab] = useState<"work" | "activity">("work");
@@ -368,6 +418,10 @@ export default function Timeline() {
                       </button>
                     )}
                   </div>
+                  
+                  {userProfile?.role === "freelancer" && (
+                    <MatchScoreBadge work={work} userProfile={userProfile} />
+                  )}
                 </motion.div>
               ))
             )}
